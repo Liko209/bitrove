@@ -51,12 +51,15 @@ export default function App() {
     <div className="min-h-full flex flex-col">
       <div className="sticky top-0 z-10">
         <UpdateBanner />
-      <header className="border-b border-stone-200 bg-white">
-        <div className="max-w-7xl mx-auto px-6 py-3 flex items-center gap-6">
-          <Link to="/" className="font-semibold text-stone-900 tracking-tight hover:text-stone-700 transition-colors">
+      <header className="border-b border-stone-200 bg-white app-drag">
+        <div className="max-w-7xl mx-auto pl-24 pr-6 py-3 flex items-center gap-6">
+          <Link
+            to="/"
+            className="font-semibold text-stone-900 tracking-tight hover:text-stone-700 transition-colors app-no-drag"
+          >
             Trove
           </Link>
-          <nav className="flex gap-1">
+          <nav className="flex gap-1 app-no-drag">
             {NAV.map((n) => (
               <NavLink
                 key={n.to}
@@ -65,7 +68,7 @@ export default function App() {
               />
             ))}
           </nav>
-          <div className="ml-auto flex items-center gap-3">
+          <div className="ml-auto flex items-center gap-3 app-no-drag">
             <GlobalJobIndicator />
             <div className="text-xs text-stone-500">v0.0.4</div>
           </div>

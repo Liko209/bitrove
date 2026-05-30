@@ -26,9 +26,13 @@ const RESOURCES = IS_PACKAGED ? process.resourcesPath : REPO_ROOT;
 
 export function adminEntry(): { command: string; args: string[]; cwd: string } {
   if (IS_PACKAGED) {
+    // build-admin.mjs writes admin to dist-app/admin/index.mjs which
+    // electron-builder copies into Resources/app/admin/index.mjs via
+    // extraResources. We spawn it through the Electron binary itself
+    // (services.ts sets ELECTRON_RUN_AS_NODE=1 so it acts as plain Node).
     return {
       command: process.execPath,
-      args: [join(RESOURCES, "app", "admin", "index.js")],
+      args: [join(RESOURCES, "app", "admin", "index.mjs")],
       cwd: join(RESOURCES, "app"),
     };
   }

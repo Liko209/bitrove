@@ -8,6 +8,7 @@
 import { spawn, ChildProcess } from "node:child_process";
 import { join } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
+import { app } from "electron";
 import { adminEntry, llamaServerBinary, modelsDir, dbPath, summary } from "./paths.ts";
 
 export type ServiceName = "admin" | "embed" | "rerank";
@@ -98,6 +99,21 @@ export async function startAdmin(): Promise<void> {
     RERANK_URL: `http://127.0.0.1:${PORTS.rerank}`,
     KB_DB: dbPath(),
   };
+
+  // In packaged mode the admin entry runs inside Electron's bundled Node;
+  // tell that runtime where to find native modules (better-sqlite3 + sqlite-vec
+  // were rebuilt for Electron and live in app.asar.unpacked/node_modules).
+  if (app.isPackaged) {
+    env.ELECTRON_RUN_AS_NODE = "1";
+    const unpackedModules = join(
+      process.resourcesPath,
+      "app.asar.unpacked",
+      "node_modules",
+    );
+    env.NODE_PATH = process.env.NODE_PATH
+      ? `${process.env.NODE_PATH}:${unpackedModules}`
+      : unpackedModules;
+  }
 
   const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
   PROCS.admin = child;

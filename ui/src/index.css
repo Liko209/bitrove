@@ -5,6 +5,17 @@ body,
 #root {
   height: 100%;
 }
+
+/* Window drag regions. The Electron window uses titleBarStyle: "hiddenInset"
+   which hides the OS chrome but does NOT auto-mark the top of the web view
+   as draggable. Anything with .app-drag becomes a drag handle; interactive
+   children should opt out with .app-no-drag. */
+.app-drag {
+  -webkit-app-region: drag;
+}
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
 body {
   font-family:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial,
