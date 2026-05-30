@@ -21,8 +21,10 @@
 import { createRequire } from "node:module";
 import type { UpdateInfo, ProgressInfo } from "electron-updater";
 import { app, shell } from "electron";
-import { appendFileSync, mkdirSync, existsSync } from "node:fs";
+import { appendFileSync, mkdirSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 
 const require_ = createRequire(import.meta.url);
 const { autoUpdater } = require_("electron-updater") as {
@@ -75,12 +77,11 @@ const FILE_LOGGER = {
   debug: (...a: unknown[]) => logLine("DEBUG", a),
 };
 
-// Squirrel.Mac (electron-updater's backend) works on unsigned builds —
-// it just extracts the downloaded ZIP next to the running app and swaps
-// the bundle on quit. We keep this on so the in-app "Install update"
-// button does the right thing; once we add Developer ID signing later,
-// the same path becomes Gatekeeper-clean automatically.
-const QUIT_AND_INSTALL_AVAILABLE = true;
+// Until Bitrove is code-signed, Squirrel.Mac's quitAndInstall() silently
+// fails: it quits the app, but its ShipIt helper can't atomically swap
+// /Applications/Bitrove.app without a signed LaunchAgent. So we keep
+// Squirrel.Mac off and run the swap ourselves — see manualSwapInstall().
+const QUIT_AND_INSTALL_AVAILABLE = false;
 
 export type UpdaterState =
   | { phase: "idle" }
@@ -88,7 +89,7 @@ export type UpdaterState =
   | { phase: "up-to-date"; checkedAt: number; currentVersion: string }
   | { phase: "available"; info: UpdateInfoLite }
   | { phase: "downloading"; info: UpdateInfoLite; percent: number; bytesPerSecond?: number; transferred?: number; total?: number }
-  | { phase: "ready"; info: UpdateInfoLite; downloadedFile?: string; canQuitAndInstall: boolean }
+  | { phase: "ready"; info: UpdateInfoLite; downloadedFile?: string; canAutoInstall: boolean }
   | { phase: "error"; message: string };
 
 export type UpdateInfoLite = {
@@ -159,11 +160,15 @@ export function initUpdater(): void {
   });
   autoUpdater.on("update-downloaded", (info) => {
     downloadedFilePath = (info as unknown as { downloadedFile?: string }).downloadedFile ?? null;
+    // Either Squirrel.Mac is willing to handle it (signed builds), OR we
+    // got a ZIP we can manual-swap ourselves. Either way the user sees
+    // "Restart and install" instead of "Open installer".
+    const haveZip = !!downloadedFilePath && downloadedFilePath.endsWith(".zip");
     state = {
       phase: "ready",
       info: lite(info),
       downloadedFile: downloadedFilePath ?? undefined,
-      canQuitAndInstall: QUIT_AND_INSTALL_AVAILABLE,
+      canAutoInstall: QUIT_AND_INSTALL_AVAILABLE || haveZip,
     };
     notify();
   });
@@ -205,24 +210,113 @@ export async function downloadUpdate(): Promise<void> {
   }
 }
 
-// "Install" — branches on whether quit-and-install is safe (signed build).
-// On unsigned builds we reveal the downloaded DMG in Finder so the user can
-// drag-and-replace manually.
-export async function installUpdate(): Promise<{ method: "quitAndInstall" | "revealFile" | "noop" }> {
+// "Install" — try in order:
+//   1. quitAndInstall() if Squirrel.Mac is usable (signed builds, future).
+//   2. manualSwapInstall() — extract the downloaded ZIP, swap the .app,
+//      relaunch. Works on unsigned builds the user installed into
+//      /Applications themselves.
+//   3. Reveal the file in Finder so the user can install by hand.
+export async function installUpdate(): Promise<{
+  method: "quitAndInstall" | "manualSwap" | "revealFile" | "noop";
+}> {
   if (state.phase !== "ready") return { method: "noop" };
   if (QUIT_AND_INSTALL_AVAILABLE) {
     autoUpdater.quitAndInstall();
     return { method: "quitAndInstall" };
   }
+  if (
+    downloadedFilePath &&
+    downloadedFilePath.endsWith(".zip") &&
+    existsSync(downloadedFilePath)
+  ) {
+    try {
+      await manualSwapInstall(downloadedFilePath);
+      return { method: "manualSwap" };
+    } catch (e) {
+      FILE_LOGGER.error(
+        "manualSwapInstall failed; falling back to Finder reveal:",
+        (e as Error).message,
+      );
+    }
+  }
   if (downloadedFilePath && existsSync(downloadedFilePath)) {
     shell.showItemInFolder(downloadedFilePath);
     return { method: "revealFile" };
   }
-  // Fallback: open the GitHub releases page so the user can grab the DMG.
   const repoUrl = (autoUpdater as unknown as { getFeedURL?: () => string }).getFeedURL?.();
   if (repoUrl) {
     await shell.openExternal(repoUrl);
     return { method: "revealFile" };
   }
   return { method: "noop" };
+}
+
+// Find the currently-running .app bundle from process.execPath. Returns
+// null in dev (where Electron runs from node_modules) — manualSwapInstall
+// refuses to proceed in that case.
+function getInstalledAppBundle(): string | null {
+  // /Applications/Bitrove.app/Contents/MacOS/Bitrove → /Applications/Bitrove.app
+  const m = process.execPath.match(/^(.*?\.app)\/Contents\/MacOS\//);
+  return m ? m[1] : null;
+}
+
+// Unsigned in-place update. Extracts the ZIP we just downloaded, then
+// hands a detached bash script to /bin/bash:
+//   sleep 1               (give the parent process time to exit cleanly)
+//   rm -rf <old.app>
+//   mv <new.app> <target>
+//   xattr -cr <target>    (clear quarantine on the freshly-written bytes)
+//   open <target>
+// Then we app.quit(). If anything in the script fails, the system is left
+// in a consistent state: either the old app stays (rm failed early) or
+// the new one is in place (mv succeeded), there's no half-extracted
+// intermediate exposed.
+async function manualSwapInstall(zipPath: string): Promise<void> {
+  const target = getInstalledAppBundle();
+  if (!target) {
+    throw new Error("Could not resolve installed app path (running in dev?)");
+  }
+
+  const stamp = Number(process.pid).toString(36) + "-" + process.uptime().toString().replace(".", "");
+  const stageDir = join(tmpdir(), `bitrove-update-${stamp}`);
+  mkdirSync(stageDir, { recursive: true });
+
+  FILE_LOGGER.info("manualSwapInstall: extracting", zipPath, "→", stageDir);
+  // `ditto -x -k` is macOS's native ZIP extractor and preserves the
+  // .app bundle's executable bits / symlinks / Info.plist correctly,
+  // which `unzip` from /usr/bin sometimes mangles for code bundles.
+  const extract = spawnSync("/usr/bin/ditto", ["-x", "-k", zipPath, stageDir], {
+    encoding: "utf8",
+  });
+  if (extract.status !== 0) {
+    throw new Error(`ditto failed: ${extract.stderr || extract.stdout || extract.status}`);
+  }
+
+  // electron-updater's mac ZIP contains a single Bitrove.app at the root.
+  const newApp = join(stageDir, "Bitrove.app");
+  if (!existsSync(newApp)) {
+    throw new Error(`extracted bundle not found at ${newApp}`);
+  }
+
+  const script = `#!/bin/bash
+set -e
+sleep 1
+rm -rf "${target}"
+mv "${newApp}" "${target}"
+xattr -cr "${target}" 2>/dev/null || true
+open "${target}"
+rm -rf "${stageDir}" 2>/dev/null || true
+`;
+  const scriptPath = join(stageDir, "swap.sh");
+  writeFileSync(scriptPath, script, { mode: 0o755 });
+  FILE_LOGGER.info("manualSwapInstall: spawning swap script", scriptPath);
+
+  const child = spawn("/bin/bash", [scriptPath], {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+
+  // Give the OS a beat to actually fork the detached process before we exit.
+  setTimeout(() => app.quit(), 200);
 }

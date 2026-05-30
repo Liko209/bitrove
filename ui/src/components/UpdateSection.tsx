@@ -108,7 +108,7 @@ export function UpdateAvailableCard() {
                 Released {new Date(state.info.releaseDate).toLocaleDateString()}
               </div>
             )}
-            {state.phase === "ready" && !state.canQuitAndInstall && (
+            {state.phase === "ready" && !state.canAutoInstall && (
               <div className="text-xs text-stone-500 mt-1">
                 Drag the new app into <code className="bg-stone-100 px-1 py-0.5 rounded">/Applications</code>{" "}
                 to update.
@@ -129,7 +129,7 @@ export function UpdateAvailableCard() {
                 onClick={install}
                 className="px-3 py-1.5 rounded-md text-sm font-medium bg-stone-900 text-white border border-stone-900 hover:bg-stone-700"
               >
-                {state.canQuitAndInstall ? "Restart and install" : "Open installer"}
+                {state.canAutoInstall ? "Restart and install" : "Open installer"}
               </button>
             )}
           </div>
