@@ -149,6 +149,7 @@ function Metric({ label, value, sub }: { label: string; value: string; sub?: str
    them or they show up in Missing). */
 function WatchedRootsSection() {
   const [data, setData] = useState<Awaited<ReturnType<typeof api.listWatchedRoots>> | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -157,22 +158,31 @@ function WatchedRootsSection() {
   }
   useEffect(() => {
     load();
-    const t = setInterval(load, 15000);
+    // Faster polling while something is actively scanning so the "Now" file
+    // updates without 15s lag. Drops back to the slow tick once idle.
+    const anyActive = data?.watcher.active.some((a) => a.scanning || a.dirty > 0);
+    const t = setInterval(load, anyActive ? 2000 : 15000);
     return () => clearInterval(t);
-  }, []);
+  }, [data?.watcher.active]);
 
   if (!data || data.rows.length === 0) return null;
 
+  const totalIndexed = data.rows.reduce((s, r) => s + r.stats.indexed_files, 0);
+
   return (
     <section className="mb-8">
-      <h2 className="t-section mb-3">Folders Bitrove is watching</h2>
-      <div className="bg-white border border-stone-200 rounded-xl divide-y divide-stone-100">
+      <div className="flex items-baseline gap-2 mb-3">
+        <h2 className="t-section">Folders Bitrove is watching</h2>
+        <span className="text-xs text-stone-400 tabular-nums">
+          {data.rows.length} folder{data.rows.length === 1 ? "" : "s"} ·{" "}
+          {totalIndexed.toLocaleString()} files indexed
+        </span>
+      </div>
+      <div className="bg-white border border-stone-200 rounded-xl divide-y divide-stone-100 overflow-hidden">
         {data.rows.map((r) => {
           const live = data.watcher.active.find((a) => a.root === r.path);
-          const lastDone = r.last_completed_at
-            ? new Date(r.last_completed_at).toLocaleString()
-            : "—";
           const dirty = live?.dirty ?? 0;
+          const isOpen = expanded === r.path;
           const stateLabel = !r.watch_enabled
             ? "Paused"
             : live?.scanning
@@ -187,42 +197,151 @@ function WatchedRootsSection() {
               : dirty > 0
                 ? "bg-amber-500"
                 : "bg-emerald-500";
+          const lastDone = r.last_completed_at
+            ? relativeTime(r.last_completed_at)
+            : "never";
+          const currentFile = live?.currentFile ?? null;
           return (
-            <div key={r.path} className="px-4 py-3 flex items-center gap-3 text-sm">
-              <span className={"w-1.5 h-1.5 rounded-full shrink-0 " + stateDot} />
-              <div className="flex-1 min-w-0">
-                <div className="font-mono text-stone-800 truncate" title={r.path}>
-                  {r.path}
+            <div key={r.path}>
+              <div
+                className="px-4 py-3 flex items-center gap-3 text-sm hover:bg-stone-50 cursor-pointer"
+                onClick={() => setExpanded(isOpen ? null : r.path)}
+              >
+                <span className={"relative inline-block h-2 w-2 shrink-0"}>
+                  {live?.scanning && (
+                    <span className="absolute inset-0 rounded-full bg-sky-500 animate-ping opacity-50" />
+                  )}
+                  <span className={"absolute inset-0 rounded-full " + stateDot} />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="font-mono text-stone-800 truncate" title={r.path}>
+                    {r.path}
+                  </div>
+                  <div className="text-xs text-stone-500 mt-0.5 flex items-center gap-2 flex-wrap">
+                    <span className="tabular-nums">
+                      <strong className="text-stone-700 font-medium">
+                        {r.stats.indexed_files.toLocaleString()}
+                      </strong>{" "}
+                      files
+                    </span>
+                    {r.stats.total_size_bytes > 0 && (
+                      <span className="text-stone-400">· {bytes(r.stats.total_size_bytes)}</span>
+                    )}
+                    <span className="text-stone-400">·</span>
+                    <span>{stateLabel}</span>
+                    <span className="text-stone-400">· last sync {lastDone}</span>
+                    {r.stats.missing_files > 0 && (
+                      <span className="text-amber-700">
+                        · {r.stats.missing_files} missing
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <div className="text-xs text-stone-500 mt-0.5">
-                  {stateLabel} · last sync {lastDone}
-                </div>
+                <span className="text-stone-400 text-xs">{isOpen ? "▾" : "▸"}</span>
               </div>
-              <button
-                onClick={async () => {
-                  await api.setWatchedRootEnabled(r.path, !r.watch_enabled);
-                  load();
-                }}
-                className="text-xs px-2.5 py-1 rounded-md text-stone-700 hover:bg-stone-100"
-              >
-                {r.watch_enabled ? "Pause" : "Resume"}
-              </button>
-              <button
-                onClick={async () => {
-                  if (!confirm(`Stop watching ${r.path}?\n\nIndexed files stay in the library.`)) return;
-                  await api.removeWatchedRoot(r.path);
-                  load();
-                }}
-                className="text-xs px-2.5 py-1 rounded-md text-stone-500 hover:text-rose-700 hover:bg-rose-50"
-              >
-                Remove
-              </button>
+
+              {isOpen && (
+                <div className="px-4 pb-4 pt-1 bg-stone-50/50 border-t border-stone-100">
+                  {currentFile && (
+                    <div className="mb-3 px-3 py-2 rounded-md bg-white border border-stone-200 flex items-center gap-2.5">
+                      <div className="shrink-0 w-3 h-3 border-2 border-stone-300 border-t-stone-700 rounded-full animate-spin" />
+                      <span className="t-section">Now</span>
+                      <span className="text-xs font-mono text-stone-700 truncate" title={currentFile}>
+                        {currentFile}
+                      </span>
+                    </div>
+                  )}
+
+                  {r.stats.top_subdirs.length > 0 && (
+                    <>
+                      <div className="t-section mb-2">Inside this folder</div>
+                      <SubdirBars subdirs={r.stats.top_subdirs} />
+                    </>
+                  )}
+
+                  <div className="flex items-center gap-3 mt-3 text-xs">
+                    <Link
+                      to={`/sources?prefix=${encodeURIComponent(r.path)}`}
+                      className="text-stone-600 hover:text-stone-900 underline-offset-2 hover:underline"
+                    >
+                      Browse all {r.stats.indexed_files.toLocaleString()} files →
+                    </Link>
+                    <button
+                      onClick={async () => {
+                        await api.setWatchedRootEnabled(r.path, !r.watch_enabled);
+                        load();
+                      }}
+                      className="ml-auto px-2.5 py-1 rounded-md text-stone-700 hover:bg-stone-200"
+                    >
+                      {r.watch_enabled ? "Pause watching" : "Resume watching"}
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!confirm(`Stop watching ${r.path}?\n\nIndexed files stay in the library — they just won't keep updating.`)) return;
+                        await api.removeWatchedRoot(r.path);
+                        load();
+                      }}
+                      className="px-2.5 py-1 rounded-md text-stone-500 hover:text-rose-700 hover:bg-rose-50"
+                    >
+                      Stop watching
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
       </div>
     </section>
   );
+}
+
+function SubdirBars({
+  subdirs,
+}: {
+  subdirs: { name: string; indexed: number; bytes: number }[];
+}) {
+  const max = Math.max(...subdirs.map((s) => s.indexed), 1);
+  return (
+    <ul className="space-y-1.5">
+      {subdirs.map((s) => {
+        const ratio = Math.round((s.indexed / max) * 100);
+        return (
+          <li key={s.name} className="text-xs">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="font-medium text-stone-800 truncate" title={s.name}>
+                {s.name === "(root)" ? (
+                  <em className="text-stone-500">files at root</em>
+                ) : (
+                  s.name
+                )}
+              </span>
+              <span className="text-stone-500 tabular-nums shrink-0">
+                {s.indexed.toLocaleString()} files
+                {s.bytes > 0 && (
+                  <span className="text-stone-400"> · {bytes(s.bytes)}</span>
+                )}
+              </span>
+            </div>
+            <div className="mt-1 h-1 rounded bg-stone-100 overflow-hidden">
+              <div
+                className="h-full bg-emerald-500/70"
+                style={{ width: `${ratio}%` }}
+              />
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function relativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return "just now";
+  if (diff < 3_600_000) return `${Math.round(diff / 60_000)} min ago`;
+  if (diff < 86_400_000) return `${Math.round(diff / 3_600_000)} hr ago`;
+  return new Date(ts).toLocaleDateString();
 }
 
 /* ── Missing files ───────────────────────────────────────────────

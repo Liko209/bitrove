@@ -245,6 +245,75 @@ export function listWatchedRoots(db: Database.Database): WatchedRoot[] {
   return db.prepare(`SELECT * FROM watched_roots ORDER BY added_at DESC`).all() as WatchedRoot[];
 }
 
+// Per-root counters surfaced to the UI so the user can see what each
+// watched root actually covers, not just its path.
+export type WatchedRootStats = {
+  path: string;
+  indexed_files: number;
+  total_chunks: number;
+  total_size_bytes: number;
+  missing_files: number;
+  // Tallies grouped by the first path segment under this root, mirroring
+  // what /api/source-preview returns. Lets the UI render a "what's in
+  // here" mini-tree without a separate request.
+  top_subdirs: { name: string; indexed: number; bytes: number }[];
+};
+
+export function watchedRootStats(db: Database.Database, root: string): WatchedRootStats {
+  const totals = db
+    .prepare(
+      `SELECT
+         COUNT(*) AS indexed_files,
+         COALESCE(SUM(chunk_count), 0) AS total_chunks,
+         COALESCE(SUM(size_bytes), 0) AS total_size_bytes
+       FROM sources WHERE watched_root = ? AND missing_since IS NULL`,
+    )
+    .get(root) as {
+      indexed_files: number;
+      total_chunks: number;
+      total_size_bytes: number;
+    };
+  const missing = (db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM sources WHERE watched_root = ? AND missing_since IS NOT NULL`,
+    )
+    .get(root) as { n: number }).n;
+
+  // Group by top-level segment under the root. Done in JS for clarity —
+  // the file counts are tiny relative to the chunks table.
+  const rootWithSep = root.endsWith("/") ? root : root + "/";
+  const rows = db
+    .prepare(
+      `SELECT source_path, size_bytes FROM sources
+       WHERE watched_root = ? AND missing_since IS NULL`,
+    )
+    .all(root) as { source_path: string; size_bytes: number | null }[];
+  const buckets = new Map<string, { indexed: number; bytes: number }>();
+  for (const r of rows) {
+    const rel = r.source_path.startsWith(rootWithSep)
+      ? r.source_path.slice(rootWithSep.length)
+      : r.source_path;
+    const seg = rel.split("/")[0] || "(root)";
+    const b = buckets.get(seg) ?? { indexed: 0, bytes: 0 };
+    b.indexed++;
+    b.bytes += r.size_bytes ?? 0;
+    buckets.set(seg, b);
+  }
+  const top_subdirs = [...buckets.entries()]
+    .map(([name, v]) => ({ name, indexed: v.indexed, bytes: v.bytes }))
+    .sort((a, b) => b.indexed - a.indexed)
+    .slice(0, 8);
+
+  return {
+    path: root,
+    indexed_files: totals.indexed_files,
+    total_chunks: totals.total_chunks,
+    total_size_bytes: totals.total_size_bytes,
+    missing_files: missing,
+    top_subdirs,
+  };
+}
+
 export function addWatchedRoot(db: Database.Database, path: string): void {
   db.prepare(
     `INSERT INTO watched_roots (path, added_at, watch_enabled) VALUES (?, ?, 1)

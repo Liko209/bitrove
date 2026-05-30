@@ -46,6 +46,7 @@ import {
   setWatchEnabled,
   listWatchedRoots,
   listMissingSources,
+  watchedRootStats,
 } from "./db.ts";
 import {
   initWatchers,
@@ -931,7 +932,10 @@ app.get("/api/list-subdirs", async (req, res) => {
 app.get("/api/watched-roots", (_req, res) => {
   const db = openDb();
   try {
-    const rows = listWatchedRoots(db);
+    const rows = listWatchedRoots(db).map((r) => ({
+      ...r,
+      stats: watchedRootStats(db, r.path),
+    }));
     res.json({ rows, watcher: watcherStatus() });
   } finally {
     db.close();

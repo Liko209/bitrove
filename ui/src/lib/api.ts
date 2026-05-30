@@ -194,8 +194,24 @@ export const api = {
         last_scanned_at: number | null;
         last_completed_at: number | null;
         watch_enabled: number;
+        stats: {
+          path: string;
+          indexed_files: number;
+          total_chunks: number;
+          total_size_bytes: number;
+          missing_files: number;
+          top_subdirs: { name: string; indexed: number; bytes: number }[];
+        };
       }[];
-      watcher: { initialized: boolean; active: { root: string; dirty: number; scanning: boolean }[] };
+      watcher: {
+        initialized: boolean;
+        active: {
+          root: string;
+          dirty: number;
+          scanning: boolean;
+          currentFile: string | null;
+        }[];
+      };
     }>("/api/watched-roots"),
   setWatchedRootEnabled: (path: string, enabled: boolean) =>
     j<{ ok: true }>("/api/watched-roots", {

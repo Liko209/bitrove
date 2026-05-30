@@ -55,6 +55,9 @@ type WatchEntry = {
   periodicTimer: NodeJS.Timeout | null;
   // Prevent two passes piling up if the previous one is still running.
   scanning: boolean;
+  // Path the watcher is actively running ingestFile() on, exposed to
+  // the UI so "Scanning…" rows can show the live file.
+  currentFile: string | null;
 };
 
 const active = new Map<string, WatchEntry>();
@@ -128,6 +131,7 @@ export async function startWatching(root: WatchedRoot): Promise<void> {
     debounceTimer: null,
     periodicTimer: null,
     scanning: false,
+    currentFile: null,
   };
 
   const scheduleDrain = () => {
@@ -201,6 +205,7 @@ async function drainDirty(entry: WatchEntry): Promise<void> {
   const db = openDb();
   try {
     for (const p of paths) {
+      entry.currentFile = p;
       // includeDuplicates=false: a watcher catching a freshly-added
       // duplicate should skip it just like the folder-scan flow does.
       const r = await ingestFile(db, p, { watchedRoot: entry.root, includeDuplicates: false });
@@ -209,6 +214,7 @@ async function drainDirty(entry: WatchEntry): Promise<void> {
       }
     }
   } finally {
+    entry.currentFile = null;
     db.close();
   }
 }
@@ -230,11 +236,13 @@ async function runFullPass(entry: WatchEntry): Promise<void> {
 
     for await (const p of walkSmart(entry.root, walkOpts)) {
       seen.add(p);
+      entry.currentFile = p;
       const r = await ingestFile(db, p, { watchedRoot: entry.root, includeDuplicates: false });
       if (r.status === "error") {
         console.warn(`[watcher] periodic ingest error ${p}:`, r.error);
       }
     }
+    entry.currentFile = null;
 
     const missingCount = markSourcesMissing(db, entry.root, seen, Date.now());
     markScanRun(db, entry.root, true);
@@ -249,7 +257,12 @@ async function runFullPass(entry: WatchEntry): Promise<void> {
 
 export function watcherStatus(): {
   initialized: boolean;
-  active: { root: string; dirty: number; scanning: boolean }[];
+  active: {
+    root: string;
+    dirty: number;
+    scanning: boolean;
+    currentFile: string | null;
+  }[];
 } {
   return {
     initialized,
@@ -257,6 +270,7 @@ export function watcherStatus(): {
       root: e.root,
       dirty: e.dirty.size,
       scanning: e.scanning,
+      currentFile: e.currentFile,
     })),
   };
 }
