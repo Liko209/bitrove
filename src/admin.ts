@@ -80,6 +80,17 @@ app.get("/api/source-preview", async (req, res) => {
   const HARD_CAP = 200000;
   let seen = 0;
 
+  // For the "From these folders" breakdown and the sample preview we
+  // build two extra structures while walking — both bounded so the
+  // response stays small even for huge libraries.
+  const SAMPLE_LIMIT = 12;
+  const TOP_FOLDERS_LIMIT = 6;
+  type Sample = { path: string; name: string; kind: "text" | "catalog"; size: number };
+  type FolderStat = { name: string; indexable: number; skipped: number; bytes: number };
+  const samples: Sample[] = [];
+  const folderStats = new Map<string, FolderStat>();
+  const rootWithSep = path.endsWith("/") ? path : path + "/";
+
   try {
     for await (const p of walkSmart(path, { excludes })) {
       seen++;
@@ -87,23 +98,44 @@ app.get("/api/source-preview", async (req, res) => {
       const ext = extname(p).toLowerCase() || "(noext)";
       byExt[ext] = (byExt[ext] ?? 0) + 1;
       const kind = classify(p);
+      let size = 0;
       try {
-        totalBytes += statSync(p).size;
+        size = statSync(p).size;
+        totalBytes += size;
       } catch {}
       if (kind === "text") text++;
       else if (kind === "catalog") catalog++;
       else skipped++;
+
+      // Folder breakdown: bucket by the first path segment under the root.
+      // Files directly in the root land under "(root)".
+      const rel = p.startsWith(rootWithSep) ? p.slice(rootWithSep.length) : p;
+      const seg = rel.split("/")[0] || "(root)";
+      const bucket = folderStats.get(seg) ?? { name: seg, indexable: 0, skipped: 0, bytes: 0 };
+      if (kind === "skip") bucket.skipped++;
+      else bucket.indexable++;
+      bucket.bytes += size;
+      folderStats.set(seg, bucket);
+
+      // Sample preview: grab the first SAMPLE_LIMIT actually-indexable files
+      // so the user can sanity-check what Bitrove will read.
+      if (samples.length < SAMPLE_LIMIT && (kind === "text" || kind === "catalog")) {
+        const name = p.slice(p.lastIndexOf("/") + 1);
+        samples.push({ path: p, name, kind, size });
+      }
     }
   } catch (e) {
     return res.status(500).json({ error: (e as Error).message });
   }
 
-  // ~1s per text doc + ~0.05s per catalog entry on M-series. Floor 5s.
   const estimatedSeconds = Math.max(5, Math.round(text * 1.0 + catalog * 0.05));
   const topExtensions = Object.entries(byExt)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 8)
     .map(([ext, count]) => ({ ext, count }));
+  const topFolders = [...folderStats.values()]
+    .sort((a, b) => b.indexable - a.indexable || b.bytes - a.bytes)
+    .slice(0, TOP_FOLDERS_LIMIT);
 
   res.json({
     path,
@@ -115,6 +147,8 @@ app.get("/api/source-preview", async (req, res) => {
     totalBytes,
     estimatedSeconds,
     topExtensions,
+    topFolders,
+    sampleFiles: samples,
   });
 });
 

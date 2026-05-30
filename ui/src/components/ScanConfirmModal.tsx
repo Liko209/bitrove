@@ -50,17 +50,17 @@ export default function ScanConfirmModal({
       onClick={onCancel}
     >
       <div
-        className="bg-white rounded-2xl border border-stone-200 shadow-xl w-full max-w-lg overflow-hidden"
+        className="bg-white rounded-2xl border border-stone-200 shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-6 pt-5 pb-4 border-b border-stone-100">
+        <div className="px-6 pt-5 pb-4 border-b border-stone-100 shrink-0">
           <h2 className="text-lg font-semibold text-stone-900">Add this folder to your library?</h2>
           <p className="text-sm text-stone-500 mt-1 truncate font-mono" title={path}>
             {shortPath(path)}
           </p>
         </div>
 
-        <div className="px-6 py-5">
+        <div className="px-6 py-5 overflow-y-auto flex-1">
           {err && (
             <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded text-sm">
               {err}
@@ -131,6 +131,52 @@ export default function ScanConfirmModal({
                 )}
               </div>
 
+              {preview.topFolders.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-stone-100">
+                  <div className="flex items-baseline justify-between mb-2">
+                    <div className="text-xs uppercase tracking-wider text-stone-500">
+                      From these folders
+                    </div>
+                    <div className="text-[10px] text-stone-400">top {preview.topFolders.length}</div>
+                  </div>
+                  <FolderBreakdown folders={preview.topFolders} />
+                </div>
+              )}
+
+              {preview.sampleFiles.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-stone-100">
+                  <div className="flex items-baseline justify-between mb-2">
+                    <div className="text-xs uppercase tracking-wider text-stone-500">
+                      Sample of what will be indexed
+                    </div>
+                    <div className="text-[10px] text-stone-400">
+                      first {preview.sampleFiles.length}
+                    </div>
+                  </div>
+                  <ul className="space-y-1">
+                    {preview.sampleFiles.map((f) => (
+                      <li
+                        key={f.path}
+                        className="flex items-center gap-2 text-xs text-stone-700"
+                      >
+                        <span className="shrink-0">{f.kind === "text" ? "📄" : "📚"}</span>
+                        <span className="truncate font-mono" title={f.path}>
+                          {f.name}
+                        </span>
+                        <span className="text-stone-400 tabular-nums shrink-0 ml-auto">
+                          {bytes(f.size)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {totalIndexable > preview.sampleFiles.length && (
+                    <div className="text-[11px] text-stone-500 mt-2">
+                      + {(totalIndexable - preview.sampleFiles.length).toLocaleString()} more like these
+                    </div>
+                  )}
+                </div>
+              )}
+
               {preview.topExtensions.length > 0 && (
                 <div className="mt-4 pt-4 border-t border-stone-100">
                   <div className="text-xs uppercase tracking-wider text-stone-500 mb-2">
@@ -158,9 +204,9 @@ export default function ScanConfirmModal({
           )}
         </div>
 
-        <div className="px-6 py-4 bg-stone-50 border-t border-stone-100 flex items-center gap-3">
+        <div className="px-6 py-4 bg-stone-50 border-t border-stone-100 flex items-center gap-3 shrink-0">
           <span className="text-xs text-stone-500">
-            Indexing happens in the background. You can pause it any time.
+            Runs in the background. Pause any time.
           </span>
           <div className="ml-auto flex gap-2">
             <button
@@ -172,14 +218,48 @@ export default function ScanConfirmModal({
             <button
               onClick={onConfirm}
               disabled={!preview || totalIndexable === 0 || perm.state !== "granted"}
-              className="px-3 py-1.5 rounded-md text-sm font-medium bg-stone-900 text-white hover:bg-stone-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="px-4 py-1.5 rounded-md text-sm font-medium bg-stone-900 text-white hover:bg-stone-700 disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              Start indexing
+              Start
             </button>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function FolderBreakdown({
+  folders,
+}: {
+  folders: { name: string; indexable: number; skipped: number; bytes: number }[];
+}) {
+  const max = Math.max(...folders.map((f) => f.indexable), 1);
+  return (
+    <ul className="space-y-1.5">
+      {folders.map((f) => {
+        const ratio = Math.round((f.indexable / max) * 100);
+        return (
+          <li key={f.name} className="text-xs">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="font-medium text-stone-800 truncate" title={f.name}>
+                {f.name === "(root)" ? <em className="text-stone-500">files at root</em> : f.name}
+              </span>
+              <span className="text-stone-500 tabular-nums shrink-0">
+                {f.indexable.toLocaleString()} files
+                <span className="text-stone-400"> · {bytes(f.bytes)}</span>
+              </span>
+            </div>
+            <div className="mt-1 h-1 rounded bg-stone-100 overflow-hidden">
+              <div
+                className="h-full bg-emerald-500/70"
+                style={{ width: `${ratio}%` }}
+              />
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

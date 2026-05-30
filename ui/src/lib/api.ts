@@ -114,6 +114,13 @@ export const api = {
       totalBytes: number;
       estimatedSeconds: number;
       topExtensions: { ext: string; count: number }[];
+      topFolders: { name: string; indexable: number; skipped: number; bytes: number }[];
+      sampleFiles: {
+        path: string;
+        name: string;
+        kind: "text" | "catalog";
+        size: number;
+      }[];
     }>(`/api/source-preview?path=${encodeURIComponent(path)}`),
   classify: (onlyMissing = false) =>
     j<{ jobId: string }>("/api/classify", {
