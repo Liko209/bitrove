@@ -41,28 +41,34 @@ extraResources:
     filter:
       - "**/*"
   # The bundled admin is ESM (.mjs); NODE_PATH does NOT apply to ESM
-  # imports, so native modules must live in a node_modules directory the
-  # script's own resolution walk can reach. Copy what the admin actually
-  # imports + their transitive deps into app/node_modules.
-  - from: node_modules/better-sqlite3
-    to: app/node_modules/better-sqlite3
+  # imports, so native modules + their transitive deps must live in a
+  # node_modules directory the script's own resolution walk can reach.
+  # Copy the entire root node_modules (which electron-builder has just
+  # electron-rebuilt) into app/node_modules, then strip dev-only roots
+  # and docs to keep the bundle reasonable.
+  - from: node_modules
+    to: app/node_modules
     filter:
       - "**/*"
+      # docs / metadata
       - "!**/*.{md,markdown,d.ts,map}"
-      - "!**/{CHANGELOG,README,readme,LICENSE,license}*"
-      - "!**/{test,tests,__tests__,benchmark,benchmarks,deps}/**"
-  - from: node_modules/sqlite-vec
-    to: app/node_modules/sqlite-vec
-    filter:
-      - "**/*"
-      - "!**/*.{md,markdown,d.ts,map}"
-      - "!**/{CHANGELOG,README,readme,LICENSE}*"
-  - from: node_modules/bindings
-    to: app/node_modules/bindings
-    filter: ["**/*"]
-  - from: node_modules/file-uri-to-path
-    to: app/node_modules/file-uri-to-path
-    filter: ["**/*"]
+      - "!**/{CHANGELOG*,README*,readme*,LICENSE*,LICENCE*,license*,NOTICE*}"
+      - "!**/{test,tests,__tests__,benchmark,benchmarks,examples,docs,doc}/**"
+      # dev-only roots (these come from devDependencies; we don't ship them)
+      - "!electron/**"
+      - "!electron-builder/**"
+      - "!electron-vite/**"
+      - "!@electron/**"
+      - "!esbuild/**"
+      - "!tsx/**"
+      - "!typescript/**"
+      - "!vite/**"
+      - "!@vitejs/**"
+      - "!@tailwindcss/**"
+      - "!@types/**"
+      - "!vite-plugin-static-copy/**"
+      # Skip the giant @napi-rs/canvas — we don't import it.
+      - "!@napi-rs/**"
 
 mac:
   category: public.app-category.productivity
