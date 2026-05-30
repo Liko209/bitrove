@@ -22,8 +22,16 @@ type ModelStatus = {
   error?: string;
 };
 
+type PickedFile = {
+  path: string;
+  name: string;
+  ext: string;
+  size: number;
+};
+
 const bitrove = {
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke("dialog:pickFolder"),
+  pickFiles: (): Promise<PickedFile[]> => ipcRenderer.invoke("dialog:pickFiles"),
   getServicesState: (): Promise<Record<string, ServiceState>> =>
     ipcRenderer.invoke("services:state"),
   openExternal: (url: string): Promise<boolean> =>

@@ -11,6 +11,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, type SourceRow } from "../lib/api.ts";
 import { shortPath } from "../lib/format.ts";
 import ScanConfirmModal from "../components/ScanConfirmModal.tsx";
+import PickedFilesConfirmModal from "../components/PickedFilesConfirmModal.tsx";
 import {
   PermissionPill,
   openSettingsFor,
@@ -19,10 +20,13 @@ import {
 
 type Recommended = { label: string; path: string; icon: string; description: string };
 
+type PickedFile = { path: string; name: string; ext: string; size: number };
+
 declare global {
   interface Window {
     bitrove?: {
       pickFolder: () => Promise<string | null>;
+      pickFiles?: () => Promise<PickedFile[]>;
       autodetectSources?: () => Promise<{ path: string; label: string; exists: boolean }[]>;
     };
   }
@@ -97,6 +101,7 @@ export default function Add() {
   const [indexed, setIndexed] = useState<IndexedRoot[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmPath, setConfirmPath] = useState<string | null>(null);
+  const [pickedFiles, setPickedFiles] = useState<PickedFile[] | null>(null);
   const bridge = window.bitrove;
 
   useEffect(() => {
@@ -140,6 +145,29 @@ export default function Add() {
     }
     const folder = await bridge.pickFolder();
     if (folder) setConfirmPath(folder);
+  }
+
+  async function pickAndAddFiles() {
+    if (!bridge?.pickFiles) {
+      alert("File picker is only available inside the Bitrove app.");
+      return;
+    }
+    const files = await bridge.pickFiles();
+    if (files.length > 0) setPickedFiles(files);
+  }
+
+  async function confirmAddFiles() {
+    if (!pickedFiles) return;
+    setBusy("__files");
+    try {
+      await api.ingestFiles(pickedFiles.map((f) => f.path));
+      setPickedFiles(null);
+      navigate("/jobs");
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function confirmStartScan(extraIncludeExts: string[]) {
@@ -199,27 +227,45 @@ export default function Add() {
 
       <section className="mb-10">
         <h2 className="text-sm font-semibold text-stone-900 uppercase tracking-wider mb-3">
-          Or pick any other folder
+          Or pick something else
         </h2>
-        <button
-          onClick={pickAndScan}
-          disabled={!bridge}
-          className="w-full p-4 rounded-xl border border-dashed border-stone-300 hover:border-stone-500 hover:bg-stone-50 transition text-left disabled:opacity-50"
-        >
-          <div className="flex items-center gap-3">
-            <div className="text-2xl shrink-0">📁</div>
-            <div className="flex-1 min-w-0">
-              <div className="font-medium text-stone-900">Choose a folder…</div>
-              <div className="text-xs text-stone-500 mt-0.5">
-                Pick any folder on your Mac. We'll preview what's inside before indexing.
+        <div className="space-y-2">
+          <button
+            onClick={pickAndScan}
+            disabled={!bridge}
+            className="w-full p-4 rounded-xl border border-dashed border-stone-300 hover:border-stone-500 hover:bg-stone-50 transition text-left disabled:opacity-50"
+          >
+            <div className="flex items-center gap-3">
+              <div className="text-2xl shrink-0">📁</div>
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-stone-900">Choose a folder…</div>
+                <div className="text-xs text-stone-500 mt-0.5">
+                  Pick any folder on your Mac. We'll preview what's inside and respect your default filters.
+                </div>
               </div>
+              <div className="text-stone-400 text-sm shrink-0">Browse</div>
             </div>
-            <div className="text-stone-400 text-sm shrink-0">Browse</div>
-          </div>
-        </button>
+          </button>
+          <button
+            onClick={pickAndAddFiles}
+            disabled={!bridge?.pickFiles}
+            className="w-full p-4 rounded-xl border border-dashed border-stone-300 hover:border-stone-500 hover:bg-stone-50 transition text-left disabled:opacity-50"
+          >
+            <div className="flex items-center gap-3">
+              <div className="text-2xl shrink-0">📄</div>
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-stone-900">Pick specific files…</div>
+                <div className="text-xs text-stone-500 mt-0.5">
+                  Hand-pick one or more files. Default filters don't apply — anything you select is added.
+                </div>
+              </div>
+              <div className="text-stone-400 text-sm shrink-0">Choose</div>
+            </div>
+          </button>
+        </div>
         {!bridge && (
           <p className="text-xs text-stone-500 mt-2">
-            Folder picker requires the Bitrove app (not the in-browser preview).
+            File pickers require the Bitrove app (not the in-browser preview).
           </p>
         )}
       </section>
@@ -257,6 +303,13 @@ export default function Add() {
           path={confirmPath}
           onCancel={() => setConfirmPath(null)}
           onConfirm={confirmStartScan}
+        />
+      )}
+      {pickedFiles && (
+        <PickedFilesConfirmModal
+          files={pickedFiles}
+          onCancel={() => setPickedFiles(null)}
+          onConfirm={confirmAddFiles}
         />
       )}
     </div>

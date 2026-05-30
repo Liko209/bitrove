@@ -120,6 +120,34 @@ ipcMain.handle("dialog:pickFolder", async () => {
   return r.canceled ? null : r.filePaths[0];
 });
 
+// Multi-select file picker. Returns metadata for each file so the UI can
+// show kind/size and warn about extensions on the user's exclude list
+// without a separate round-trip.
+ipcMain.handle("dialog:pickFiles", async () => {
+  const r = await dialog.showOpenDialog({
+    properties: ["openFile", "multiSelections"],
+    title: "Choose files to index",
+  });
+  if (r.canceled || r.filePaths.length === 0) return [];
+  const { stat } = await import("node:fs/promises");
+  const { extname } = await import("node:path");
+  const out: { path: string; name: string; ext: string; size: number }[] = [];
+  for (const p of r.filePaths) {
+    try {
+      const s = await stat(p);
+      out.push({
+        path: p,
+        name: p.slice(p.lastIndexOf("/") + 1),
+        ext: extname(p).toLowerCase(),
+        size: s.size,
+      });
+    } catch {
+      // Unreadable / vanished — skip, the renderer just won't see it.
+    }
+  }
+  return out;
+});
+
 ipcMain.handle("services:state", () => getStates());
 
 ipcMain.handle("shell:openExternal", async (_e, url: string) => {
