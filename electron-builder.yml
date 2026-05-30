@@ -76,8 +76,15 @@ extraResources:
 
 mac:
   category: public.app-category.productivity
+  # DMG is for first-time downloads via the website / GitHub release page.
+  # ZIP is what electron-updater's Squirrel.Mac flow requires to apply an
+  # update in-place. We ship both — without the ZIP, auto-update will fail
+  # with "ZIP file not provided" the moment a user clicks Install.
   target:
     - target: dmg
+      arch:
+        - arm64
+    - target: zip
       arch:
         - arm64
   identity: null
