@@ -94,9 +94,9 @@ function ActiveJobCard({ job }: { job: Job }) {
       className="block bg-white rounded-xl border border-stone-200 hover:border-stone-300 hover:shadow-sm transition p-5"
     >
       <div className="flex items-center gap-3 mb-3">
-        <span className="relative h-2.5 w-2.5">
+        <span className="relative inline-block h-2.5 w-2.5 shrink-0">
           <span className="absolute inset-0 rounded-full bg-emerald-500 animate-ping opacity-60" />
-          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+          <span className="absolute inset-0 rounded-full bg-emerald-500" />
         </span>
         <div className="text-sm font-medium text-stone-900 truncate flex-1">
           {job.description}

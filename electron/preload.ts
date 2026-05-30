@@ -69,6 +69,19 @@ const bitrove = {
     ipcRenderer.on("setup:update", handler);
     return () => ipcRenderer.off("setup:update", handler);
   },
+
+  // macOS file-system permissions. Both methods are no-ops in the browser
+  // preview where there is no main process; the renderer guards on
+  // `bridge.checkPermission` being defined before using either.
+  checkPermission: (
+    path: string,
+  ): Promise<{
+    state: "granted" | "denied" | "not-found" | "not-directory" | "error";
+    code?: string;
+    message?: string;
+  }> => ipcRenderer.invoke("permissions:checkPath", path),
+  openPermissionSettings: (section?: string): Promise<void> =>
+    ipcRenderer.invoke("permissions:openSettings", section),
 };
 
 contextBridge.exposeInMainWorld("bitrove", bitrove);

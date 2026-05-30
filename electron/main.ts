@@ -134,6 +134,49 @@ ipcMain.handle("shell:openInFinder", async (_e, path: string) => {
   shell.showItemInFolder(path);
 });
 
+// ── IPC: macOS file-system permission diagnostics ─────────
+// Probes each path for read access. macOS's TCC subsystem will silently
+// reject Bitrove on Documents / Desktop / Downloads / iCloud Drive if
+// the corresponding "Files and Folders" toggle is off — fail there now
+// so the UI can guide the user to System Settings instead of leaving
+// the scan to stall mid-run.
+ipcMain.handle("permissions:checkPath", async (_e, p: string) => {
+  const { readdir, stat } = await import("node:fs/promises");
+  try {
+    const s = await stat(p);
+    if (!s.isDirectory()) return { state: "not-directory" };
+    await readdir(p);
+    return { state: "granted" };
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException;
+    if (err.code === "EACCES" || err.code === "EPERM")
+      return { state: "denied", code: err.code };
+    if (err.code === "ENOENT") return { state: "not-found" };
+    return { state: "error", message: err.message };
+  }
+});
+
+ipcMain.handle("permissions:openSettings", async (_e, section?: string) => {
+  // System Settings deep-links (macOS 13+).
+  const urls: Record<string, string> = {
+    documents:
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_DocumentsFolder",
+    desktop:
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_DesktopFolder",
+    downloads:
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_DownloadsFolder",
+    icloud:
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_NetworkVolumes",
+    fda: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
+    files:
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders",
+    privacy:
+      "x-apple.systempreferences:com.apple.preference.security?Privacy",
+  };
+  const url = (section && urls[section]) || urls.privacy;
+  await shell.openExternal(url);
+});
+
 // ── IPC: model setup ──────────────────────────────────────
 ipcMain.handle("setup:listModels", () => ({
   catalog: MODELS,

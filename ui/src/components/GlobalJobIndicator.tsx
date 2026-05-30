@@ -17,9 +17,9 @@ export function GlobalJobIndicator() {
       className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-stone-900 text-white text-xs font-medium hover:bg-stone-700"
       title={`${j.description}\n${j.done}/${j.total} done · ${j.errors} errors`}
     >
-      <span className="relative inline-flex h-2 w-2">
-        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+      <span className="relative inline-block h-2 w-2">
+        <span className="animate-ping absolute inset-0 rounded-full bg-emerald-400 opacity-75"></span>
+        <span className="absolute inset-0 rounded-full bg-emerald-500"></span>
       </span>
       <span className="truncate max-w-[180px]">{j.description}</span>
       <span className="tabular-nums">{pct}%</span>

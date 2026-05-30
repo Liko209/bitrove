@@ -249,13 +249,13 @@ function ServiceDot({
 }) {
   return (
     <div className="flex items-center gap-2.5 p-2.5 rounded-lg bg-stone-50 border border-stone-100">
-      <span className="relative h-2 w-2 shrink-0">
+      <span className="relative inline-block h-2 w-2 shrink-0">
         {healthy && (
           <span className="absolute inset-0 rounded-full bg-emerald-500 animate-ping opacity-50" />
         )}
         <span
           className={
-            "relative inline-flex h-2 w-2 rounded-full " +
+            "absolute inset-0 rounded-full " +
             (healthy ? "bg-emerald-500" : "bg-stone-400")
           }
         />
