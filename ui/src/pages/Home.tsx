@@ -19,6 +19,38 @@ import {
 import { formatDurationSeconds } from "../lib/format.ts";
 import { useJobs } from "../lib/useJobs.ts";
 
+type ModelStatus = {
+  id: "embed" | "rerank";
+  filename: string;
+  displayName: string;
+  status: "missing" | "downloading" | "verifying" | "ready" | "error";
+  totalBytes?: number;
+  downloadedBytes?: number;
+  error?: string;
+};
+
+type ModelCatalogEntry = {
+  id: "embed" | "rerank";
+  filename: string;
+  displayName: string;
+  approxBytes: number;
+  url: string;
+};
+
+declare global {
+  interface Window {
+    bitrove?: {
+      pickFolder: () => Promise<string | null>;
+      autodetectSources?: () => Promise<{ path: string; label: string; exists: boolean }[]>;
+      listModels?: () => Promise<{
+        catalog: ModelCatalogEntry[];
+        statuses: Record<string, ModelStatus>;
+      }>;
+      onModelsUpdate?: (cb: (s: Record<string, ModelStatus>) => void) => () => void;
+    };
+  }
+}
+
 function bytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -106,7 +138,20 @@ export default function Home() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [claude, setClaude] = useState<ClaudeConfigInfo | null>(null);
+  const [models, setModels] = useState<{
+    catalog: ModelCatalogEntry[];
+    statuses: Record<string, ModelStatus>;
+  } | null>(null);
   const { active } = useJobs(3000);
+
+  useEffect(() => {
+    const bridge = window.bitrove;
+    if (!bridge?.listModels) return;
+    bridge.listModels().then(setModels).catch(() => {});
+    return bridge.onModelsUpdate?.((statuses) => {
+      setModels((prev) => (prev ? { ...prev, statuses } : prev));
+    });
+  }, []);
 
   async function refresh() {
     try {
@@ -223,6 +268,29 @@ export default function Home() {
         </div>
       </section>
 
+      {models && models.catalog.length > 0 && (
+        <section className="mb-8">
+          <h2 className="text-sm font-semibold text-stone-900 uppercase tracking-wider mb-3">
+            On-device models
+          </h2>
+          <div className="bg-white border border-stone-200 rounded-xl divide-y divide-stone-100">
+            {models.catalog.map((m) => (
+              <ModelRow
+                key={m.id}
+                catalog={m}
+                status={models.statuses[m.id]}
+                serviceHealthy={
+                  m.id === "embed" ? !!health?.embed : !!health?.rerank
+                }
+              />
+            ))}
+          </div>
+          <p className="text-xs text-stone-500 mt-2">
+            All inference runs on this Mac. No model API calls leave the device.
+          </p>
+        </section>
+      )}
+
       <section>
         <h2 className="text-sm font-semibold text-stone-900 uppercase tracking-wider mb-3">
           AI tools
@@ -266,6 +334,68 @@ export default function Home() {
           </div>
         </Link>
       </section>
+    </div>
+  );
+}
+
+function ModelRow({
+  catalog,
+  status,
+  serviceHealthy,
+}: {
+  catalog: ModelCatalogEntry;
+  status?: ModelStatus;
+  serviceHealthy: boolean;
+}) {
+  const state = !status
+    ? "unknown"
+    : status.status === "ready"
+      ? serviceHealthy
+        ? "running"
+        : "loaded"
+      : status.status;
+
+  const pill: Record<string, { label: string; dot: string; text: string }> = {
+    running: { label: "Running", dot: "bg-emerald-500", text: "text-emerald-700" },
+    loaded: { label: "Loaded", dot: "bg-stone-400", text: "text-stone-700" },
+    missing: { label: "Not downloaded", dot: "bg-stone-300", text: "text-stone-600" },
+    downloading: { label: "Downloading", dot: "bg-sky-500", text: "text-sky-700" },
+    verifying: { label: "Verifying", dot: "bg-sky-500", text: "text-sky-700" },
+    error: { label: "Error", dot: "bg-rose-500", text: "text-rose-700" },
+    unknown: { label: "Unknown", dot: "bg-stone-300", text: "text-stone-600" },
+  };
+  const p = pill[state];
+
+  return (
+    <div className="px-4 py-3 flex items-center gap-4">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="font-medium text-stone-900">{catalog.displayName}</span>
+          <span
+            className={
+              "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-stone-100 " +
+              p.text
+            }
+          >
+            <span className={"w-1.5 h-1.5 rounded-full " + p.dot} />
+            {p.label}
+          </span>
+        </div>
+        <div className="text-xs text-stone-500 mt-0.5 font-mono truncate">
+          {catalog.filename}
+        </div>
+        {status?.error && (
+          <div className="text-xs text-rose-700 mt-1">{status.error}</div>
+        )}
+      </div>
+      <div className="text-right">
+        <div className="text-sm tabular-nums text-stone-700">
+          {bytes(catalog.approxBytes)}
+        </div>
+        <div className="text-[10px] uppercase tracking-wider text-stone-400 mt-0.5">
+          Q4_K_M
+        </div>
+      </div>
     </div>
   );
 }
