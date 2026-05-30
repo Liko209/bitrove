@@ -23,8 +23,16 @@ function GridCard({ s, selected, onToggle }: { s: SourceRow; selected: boolean; 
       <div className="flex gap-3 mb-2">
         <FileIcon bucket={s.bucket} size={36} />
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium text-stone-900 line-clamp-2" title={s.name}>
-            {s.name}
+          <div className="text-sm font-medium text-stone-900 line-clamp-2 flex items-center gap-1.5" title={s.name}>
+            <span className="truncate">{s.name}</span>
+            {s.aliases && s.aliases.length > 0 && (
+              <span
+                className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-sky-50 text-sky-700 border border-sky-200"
+                title={`Also at:\n${s.aliases.join("\n")}`}
+              >
+                +{s.aliases.length}
+              </span>
+            )}
           </div>
           <div className="text-xs text-stone-500 mt-0.5 truncate" title={parentDir(s.source_path, 200)}>
             {parentDir(s.source_path, 32)}
@@ -255,8 +263,18 @@ export default function Sources() {
                     <div className="flex items-center gap-2 min-w-0">
                       <FileIcon bucket={r.bucket} size={22} />
                       <div className="min-w-0">
-                        <div className="text-stone-900 truncate" title={r.name}>
-                          {r.name}
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-stone-900 truncate" title={r.name}>
+                            {r.name}
+                          </span>
+                          {r.aliases && r.aliases.length > 0 && (
+                            <span
+                              className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-sky-50 text-sky-700 border border-sky-200"
+                              title={`Also at:\n${r.aliases.join("\n")}`}
+                            >
+                              +{r.aliases.length} {r.aliases.length === 1 ? "copy" : "copies"}
+                            </span>
+                          )}
                         </div>
                         {r.kind === "catalog" && (
                           <span className="text-[10px] uppercase tracking-wider text-violet-700 bg-violet-100 px-1 py-0.5 rounded">

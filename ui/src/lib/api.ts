@@ -31,6 +31,9 @@ export type SourceRow = {
   size_bytes: number;
   category: string;
   subcategory?: string;
+  // Strategy B aliases — alternate paths whose contents hash to the
+  // same xxh3 as this source. Empty for sources with no duplicates.
+  aliases?: string[];
 };
 
 export type SourceList = {

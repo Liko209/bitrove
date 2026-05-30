@@ -7,7 +7,15 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { embedOne } from "./embed.ts";
-import { openDb, search, listSources, stats, type ChunkKind, type SearchHit } from "./db.ts";
+import {
+  openDb,
+  search,
+  listSources,
+  stats,
+  aliasesForSources,
+  type ChunkKind,
+  type SearchHit,
+} from "./db.ts";
 import { rerank } from "./rerank.ts";
 
 console.error("local-kb MCP server ready (rerank: probed per-request)");
@@ -100,6 +108,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
     }
 
+    // Strategy B dedup: enrich each result with the alias paths that
+    // point at its source. The agent sees one canonical excerpt + the
+    // fact that the file lives in N places ("Also at: /Old/Backups/X.pdf").
+    const aliasDb = openDb();
+    const aliasMap = aliasesForSources(aliasDb, [...new Set(final.map((h) => h.source_path))]);
+    aliasDb.close();
+
     return {
       content: [
         {
@@ -112,7 +127,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
                   h.rerank_score !== undefined
                     ? `rerank ${h.rerank_score.toFixed(2)} / dist ${h.distance.toFixed(4)}`
                     : `dist ${h.distance.toFixed(4)}`;
-                return `[${i + 1}] [${h.kind}] ${h.source_path}#${h.chunk_index} (${score})\n${h.text}`;
+                const aliases = aliasMap.get(h.source_path) ?? [];
+                const aliasLine =
+                  aliases.length > 0
+                    ? `\nAlso at: ${aliases.slice(0, 3).join(", ")}${aliases.length > 3 ? ` (+${aliases.length - 3} more)` : ""}`
+                    : "";
+                return `[${i + 1}] [${h.kind}] ${h.source_path}#${h.chunk_index} (${score})${aliasLine}\n${h.text}`;
               })
               .join("\n\n---\n\n") || "(no results)"),
         },

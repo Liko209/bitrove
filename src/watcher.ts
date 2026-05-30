@@ -35,6 +35,7 @@ import {
   listWatchedRoots,
   markScanRun,
   markSourcesMissing,
+  markAliasesMissing,
   type WatchedRoot,
 } from "./db.ts";
 import { walkSmart } from "./walker.ts";
@@ -244,10 +245,12 @@ async function runFullPass(entry: WatchEntry): Promise<void> {
     }
     entry.currentFile = null;
 
-    const missingCount = markSourcesMissing(db, entry.root, seen, Date.now());
+    const now = Date.now();
+    const missingSources = markSourcesMissing(db, entry.root, seen, now);
+    const missingAliases = markAliasesMissing(db, entry.root, seen, now);
     markScanRun(db, entry.root, true);
     console.log(
-      `[watcher] full pass ${entry.root}: ${seen.size} files seen, ${missingCount} marked missing in ${Date.now() - startedAt}ms`,
+      `[watcher] full pass ${entry.root}: ${seen.size} seen, ${missingSources} sources + ${missingAliases} aliases marked missing in ${Date.now() - startedAt}ms`,
     );
   } finally {
     db.close();

@@ -14,6 +14,11 @@ import {
   findByContentHash,
   clearMissing,
   type SourceMetaRow,
+  upsertAlias,
+  getAlias,
+  deleteAlias,
+  findAliasByContentHash,
+  clearAliasMissing,
 } from "./db.ts";
 import { chunkText } from "./chunk.ts";
 import { extractText, classify } from "./extract.ts";
@@ -25,7 +30,10 @@ export type IngestResult =
   | { status: "skipped-cached"; path: string }
   | { status: "skipped-mtime-touched"; path: string }
   | {
-      status: "skipped-duplicate";
+      // Strategy B — same bytes as an existing source, so we recorded
+      // this path as an alias instead of re-embedding. Search results
+      // for the source will surface this path too.
+      status: "aliased-duplicate";
       path: string;
       duplicateOf: string;
       contentHash: string;
@@ -70,30 +78,30 @@ export async function ingestFile(
     return { status: "error", path, error: `stat: ${(e as Error).message}` };
   }
 
-  // Layered skip logic (Phase 2 + Option B). Order matters:
-  //   1. Path + (mtime, size) match what's on disk      → cached
-  //   2. mtime differs but size matches → maybe touch    → compare hash
-  //        - hash matches → update DB mtime, skip
-  //        - hash differs → re-index
-  //   3. Anything else (new file / size differs / no DB row) → ingest
-  //      In the ingest branch we also do dedup-A: if the file's hash
-  //      matches another already-indexed file, skip with skipped-duplicate
-  //      (unless caller passed includeDuplicates=true).
+  // Layered skip logic (Phase 2 + Option B + Strategy B). Order matters:
+  //   1. Path is an existing source AND (mtime, size) match  → cached
+  //   2. Path is an existing source, size matches but mtime differs
+  //      → hash; match → just sync mtime; mismatch → re-index
+  //   3. Path is an existing alias AND (mtime, size) match  → cached
+  //   4. Path is an existing alias, size matches mtime differs
+  //      → hash; match → sync mtime on alias; mismatch → drop alias,
+  //                                                       fall through
+  //   5. New / invalidated path → hash + dedup-B:
+  //        - hash matches a present source → record as alias
+  //        - hash matches a present alias  → record as another alias
+  //                                          to the same source
+  //        - new content → ingest as source
   const existing = !opts.force ? getSource(db, path) : undefined;
   if (existing) {
     const sameSize = existing.size_bytes === sizeBytes;
     const sameMtime = existing.mtime_ms != null && existing.mtime_ms === mtimeMs;
     if (sameSize && sameMtime) {
-      // If the file had been marked missing on a previous scan but is
-      // back now with the same identity, clear the marker.
       if (existing.missing_since != null) clearMissing(db, path);
       return { status: "skipped-cached", path };
     }
     if (sameSize && !sameMtime && existing.content_hash) {
-      // Cheap L2 check: only hash if size matches an existing record.
       const h = await hashFile(path);
       if (h === existing.content_hash) {
-        // Sync mtime so we don't hash again next pass.
         upsertSource(db, {
           ...(existing as SourceMetaRow),
           source_mtime: mtimeISO,
@@ -106,24 +114,86 @@ export async function ingestFile(
     }
   }
 
+  // Same cheap path for existing aliases — re-validates without
+  // dropping the alias whenever (mtime, size) line up.
+  const existingAlias = !opts.force ? getAlias(db, path) : undefined;
+  if (existingAlias) {
+    const sameSize = existingAlias.size_bytes === sizeBytes;
+    const sameMtime = existingAlias.mtime_ms != null && existingAlias.mtime_ms === mtimeMs;
+    if (sameSize && sameMtime) {
+      if (existingAlias.missing_since != null) clearAliasMissing(db, path);
+      return {
+        status: "aliased-duplicate",
+        path,
+        duplicateOf: existingAlias.source_path,
+        contentHash: existingAlias.content_hash,
+      };
+    }
+    if (sameSize && !sameMtime) {
+      const h = await hashFile(path);
+      if (h === existingAlias.content_hash) {
+        upsertAlias(db, {
+          ...existingAlias,
+          mtime_ms: mtimeMs,
+          size_bytes: sizeBytes,
+          missing_since: null,
+        });
+        return {
+          status: "aliased-duplicate",
+          path,
+          duplicateOf: existingAlias.source_path,
+          contentHash: existingAlias.content_hash,
+        };
+      }
+      // Content changed — drop the alias and fall through to the new-file
+      // flow below. The path may belong somewhere else now.
+      deleteAlias(db, path);
+    } else {
+      // Size mismatch → alias is stale, drop it.
+      deleteAlias(db, path);
+    }
+  }
+
   const t0 = Date.now();
 
-  // Compute hash up-front for the ingest path so we can (a) persist it
-  // and (b) detect dedup against other files.
+  // Compute hash for the ingest path so we can (a) persist it on the
+  // new source / alias row and (b) detect dedup against other files.
   const contentHash = await hashFile(path);
 
-  // Dedup-A: if a different path already indexed identical bytes, skip
-  // unless the caller said "let it through". The dedup decision happens
-  // *before* embedding so we save the costly part. We still record the
-  // path's mtime/size/hash so subsequent scans don't keep re-checking.
+  // Strategy B dedup: if another path already holds these bytes, record
+  // *this* path as an alias rather than re-embedding. Caller can opt
+  // out by passing includeDuplicates=true (used by the hand-picked
+  // ingest flow — if the user said "add this file by name" we honor it
+  // as a full source).
   if (!opts.includeDuplicates) {
-    const dups = findByContentHash(db, contentHash, path);
-    const present = dups.find((d) => d.missing_since == null);
-    if (present) {
-      return {
-        status: "skipped-duplicate",
+    // First check the canonical sources, then the existing aliases — if
+    // it matches an alias we resolve to whatever that alias points at,
+    // keeping a single canonical source per unique content hash.
+    const sourceDups = findByContentHash(db, contentHash, path);
+    const presentSource = sourceDups.find((d) => d.missing_since == null);
+    let canonicalSourcePath: string | null = null;
+    if (presentSource) {
+      canonicalSourcePath = presentSource.source_path;
+    } else {
+      const aliasDups = findAliasByContentHash(db, contentHash, path);
+      const presentAlias = aliasDups.find((a) => a.missing_since == null);
+      if (presentAlias) canonicalSourcePath = presentAlias.source_path;
+    }
+    if (canonicalSourcePath) {
+      upsertAlias(db, {
         path,
-        duplicateOf: present.source_path,
+        source_path: canonicalSourcePath,
+        content_hash: contentHash,
+        mtime_ms: mtimeMs,
+        size_bytes: sizeBytes,
+        added_at: Date.now(),
+        missing_since: null,
+        watched_root: opts.watchedRoot ?? null,
+      });
+      return {
+        status: "aliased-duplicate",
+        path,
+        duplicateOf: canonicalSourcePath,
         contentHash,
       };
     }

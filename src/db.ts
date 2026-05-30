@@ -68,6 +68,19 @@ export function openDb(): Database.Database {
       last_completed_at INTEGER,
       watch_enabled INTEGER NOT NULL DEFAULT 1
     );
+    CREATE TABLE IF NOT EXISTS file_aliases (
+      path TEXT PRIMARY KEY,
+      source_path TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      mtime_ms INTEGER,
+      size_bytes INTEGER,
+      added_at INTEGER NOT NULL,
+      missing_since INTEGER,
+      watched_root TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_aliases_source ON file_aliases(source_path);
+    CREATE INDEX IF NOT EXISTS idx_aliases_hash ON file_aliases(content_hash);
+    CREATE INDEX IF NOT EXISTS idx_aliases_watched ON file_aliases(watched_root);
   `);
   // 兼容老库：给 chunks 加 kind 列（idempotent）
   const chunkCols = db.prepare(`PRAGMA table_info(chunks)`).all() as { name: string }[];
@@ -399,6 +412,165 @@ export function listMissingSources(db: Database.Database): MissingSourceRow[] {
        FROM sources WHERE missing_since IS NOT NULL ORDER BY missing_since DESC`,
     )
     .all() as MissingSourceRow[];
+}
+
+// ── file_aliases helpers (Strategy B dedup) ───────────────────
+//
+// An alias is a file on disk whose bytes match an already-indexed source.
+// We don't re-embed it — searches against the source's chunks return
+// the alias's path alongside the original. Lets the user keep "the same
+// PDF lives in iCloud and Documents/Backups" visible without doubling
+// the embed work.
+
+export type FileAlias = {
+  path: string;
+  source_path: string;
+  content_hash: string;
+  mtime_ms: number | null;
+  size_bytes: number | null;
+  added_at: number;
+  missing_since: number | null;
+  watched_root: string | null;
+};
+
+export function upsertAlias(db: Database.Database, a: FileAlias): void {
+  db.prepare(
+    `INSERT INTO file_aliases (
+        path, source_path, content_hash, mtime_ms, size_bytes,
+        added_at, missing_since, watched_root
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(path) DO UPDATE SET
+        source_path=excluded.source_path,
+        content_hash=excluded.content_hash,
+        mtime_ms=excluded.mtime_ms,
+        size_bytes=excluded.size_bytes,
+        missing_since=excluded.missing_since,
+        watched_root=COALESCE(excluded.watched_root, file_aliases.watched_root)`,
+  ).run(
+    a.path,
+    a.source_path,
+    a.content_hash,
+    a.mtime_ms ?? null,
+    a.size_bytes ?? null,
+    a.added_at,
+    a.missing_since ?? null,
+    a.watched_root ?? null,
+  );
+}
+
+export function getAlias(db: Database.Database, path: string): FileAlias | undefined {
+  return db.prepare(`SELECT * FROM file_aliases WHERE path = ?`).get(path) as
+    | FileAlias
+    | undefined;
+}
+
+export function deleteAlias(db: Database.Database, path: string): void {
+  db.prepare(`DELETE FROM file_aliases WHERE path = ?`).run(path);
+}
+
+export function findAliasByContentHash(
+  db: Database.Database,
+  hash: string,
+  excludePath: string,
+): FileAlias[] {
+  return db
+    .prepare(
+      `SELECT * FROM file_aliases WHERE content_hash = ? AND path != ?`,
+    )
+    .all(hash, excludePath) as FileAlias[];
+}
+
+// Bulk-resolve aliases for a set of source paths. Returns a map keyed
+// by source_path → list of alias paths (sorted by added_at ASC so the
+// older / canonical ones come first). Used by /api/search to enrich
+// chunks results with "this file also lives at …" links.
+export function aliasesForSources(
+  db: Database.Database,
+  sourcePaths: string[],
+): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  if (sourcePaths.length === 0) return map;
+  const placeholders = sourcePaths.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT path, source_path FROM file_aliases
+       WHERE source_path IN (${placeholders})
+         AND missing_since IS NULL
+       ORDER BY added_at ASC`,
+    )
+    .all(...sourcePaths) as { path: string; source_path: string }[];
+  for (const r of rows) {
+    const arr = map.get(r.source_path) ?? [];
+    arr.push(r.path);
+    map.set(r.source_path, arr);
+  }
+  return map;
+}
+
+// Periodic-pass equivalent of markSourcesMissing(), but for aliases.
+export function markAliasesMissing(
+  db: Database.Database,
+  watchedRoot: string,
+  seenPaths: Set<string>,
+  now: number,
+): number {
+  const rows = db
+    .prepare(
+      `SELECT path FROM file_aliases
+       WHERE watched_root = ? AND missing_since IS NULL`,
+    )
+    .all(watchedRoot) as { path: string }[];
+  let n = 0;
+  const upd = db.prepare(`UPDATE file_aliases SET missing_since = ? WHERE path = ?`);
+  const tx = db.transaction(() => {
+    for (const r of rows) {
+      if (!seenPaths.has(r.path)) {
+        upd.run(now, r.path);
+        n++;
+      }
+    }
+  });
+  tx();
+  return n;
+}
+
+export function clearAliasMissing(db: Database.Database, path: string): void {
+  db.prepare(`UPDATE file_aliases SET missing_since = NULL WHERE path = ?`).run(path);
+}
+
+// When a source's underlying file goes away but it still has present
+// aliases, promote the oldest present alias to the new source location.
+// Run this opportunistically when "Clean up missing" is invoked so we
+// don't lose perfectly good chunks just because the primary copy moved.
+//
+// Returns the new source_path, or null if there was nothing to promote.
+export function promoteAliasToSource(
+  db: Database.Database,
+  oldSourcePath: string,
+): string | null {
+  const alias = db
+    .prepare(
+      `SELECT * FROM file_aliases
+       WHERE source_path = ? AND missing_since IS NULL
+       ORDER BY added_at ASC
+       LIMIT 1`,
+    )
+    .get(oldSourcePath) as FileAlias | undefined;
+  if (!alias) return null;
+  const newPath = alias.path;
+  const tx = db.transaction(() => {
+    // Re-point chunks + sources to the new path.
+    db.prepare(`UPDATE chunks SET source_path = ? WHERE source_path = ?`).run(newPath, oldSourcePath);
+    db.prepare(`UPDATE sources SET source_path = ? WHERE source_path = ?`).run(newPath, oldSourcePath);
+    // Re-point any aliases that pointed at the old source.
+    db.prepare(`UPDATE file_aliases SET source_path = ? WHERE source_path = ?`).run(newPath, oldSourcePath);
+    // Remove the alias row we just promoted — it's the source now.
+    db.prepare(`DELETE FROM file_aliases WHERE path = ?`).run(newPath);
+    // Carry tags + source_tags over.
+    db.prepare(`UPDATE source_tags SET source_path = ? WHERE source_path = ?`).run(newPath, oldSourcePath);
+  });
+  tx();
+  return newPath;
 }
 
 export type ListSourcesOpts = {

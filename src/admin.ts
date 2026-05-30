@@ -47,6 +47,7 @@ import {
   listWatchedRoots,
   listMissingSources,
   watchedRootStats,
+  aliasesForSources,
 } from "./db.ts";
 import {
   initWatchers,
@@ -353,8 +354,12 @@ app.get("/api/sources", (req, res) => {
     limit: req.query.limit ? Number(req.query.limit) : 50,
     offset: req.query.offset ? Number(req.query.offset) : 0,
   });
+  const aliasMap = aliasesForSources(
+    db,
+    r.rows.map((row) => row.source_path),
+  );
   db.close();
-  // enrich with size/ext/category/bucket
+  // enrich with size/ext/category/bucket + alias paths
   const enriched = r.rows.map((row) => {
     let size_bytes = 0;
     try {
@@ -362,6 +367,7 @@ app.get("/api/sources", (req, res) => {
     } catch {}
     const ext = extname(row.source_path).toLowerCase();
     const cat = deriveCategory(row.source_path);
+    const aliases = aliasMap.get(row.source_path) ?? [];
     return {
       ...row,
       name: basename(row.source_path),
@@ -370,6 +376,7 @@ app.get("/api/sources", (req, res) => {
       size_bytes,
       category: cat.category,
       subcategory: cat.subcategory,
+      aliases,
     };
   });
   res.json({ ...r, rows: enriched });
@@ -630,10 +637,11 @@ app.post("/api/ingest/scan", async (req, res) => {
         force,
         watchedRoot: watchAfterScan ? root : undefined,
       });
-      if (r.status === "skipped-duplicate") {
+      if (r.status === "aliased-duplicate") {
         duplicateCount++;
-        // Keep a tiny sample so the UI can show "e.g. invoice.pdf already
-        // existed at /Old/Backups/invoice.pdf" without dumping 100 items.
+        // Sample shown to the user as "added as alias of …". Aliases are
+        // counted as duplicates for the summary because they didn't cost
+        // an embed, but the file is still findable in search.
         if (duplicateSamples.length < 5) {
           duplicateSamples.push({ path: r.path, duplicateOf: r.duplicateOf });
         }
@@ -994,17 +1002,45 @@ app.patch("/api/watched-roots", async (req, res) => {
 app.get("/api/missing-files", (_req, res) => {
   const db = openDb();
   try {
-    const rows = listMissingSources(db);
-    res.json({ rows });
+    const sourceRows = listMissingSources(db).map((r) => ({
+      ...r,
+      type: "source" as const,
+    }));
+    // Missing aliases — they don't have chunks of their own, but the
+    // user still wants to know "this duplicate copy is gone".
+    const aliasRows = db
+      .prepare(
+        `SELECT path AS source_path, size_bytes, missing_since, watched_root, source_path AS canonical
+         FROM file_aliases WHERE missing_since IS NOT NULL ORDER BY missing_since DESC`,
+      )
+      .all() as {
+        source_path: string;
+        size_bytes: number | null;
+        missing_since: number;
+        watched_root: string | null;
+        canonical: string;
+      }[];
+    const aliasFmt = aliasRows.map((a) => ({
+      source_path: a.source_path,
+      kind: "text" as const, // arbitrary — UI only branches on type
+      chunk_count: 0,
+      size_bytes: a.size_bytes,
+      missing_since: a.missing_since,
+      watched_root: a.watched_root,
+      type: "alias" as const,
+      duplicateOf: a.canonical,
+    }));
+    res.json({ rows: [...sourceRows, ...aliasFmt] });
   } finally {
     db.close();
   }
 });
 
 app.delete("/api/missing-files", (req, res) => {
-  // Bulk delete sources whose paths are listed AND that are currently
-  // marked missing — guards against the request racing with a file
-  // reappearing between the GET and the DELETE.
+  // Bulk delete: per path, check if it's still marked missing as a
+  // source OR as an alias, then route to the right cleanup. Same path
+  // showing up under both is impossible because path is a PRIMARY KEY
+  // in each table.
   const paths = (req.body?.paths as string[]) ?? [];
   if (!Array.isArray(paths) || paths.length === 0) {
     return res.status(400).json({ error: "body.paths must be a non-empty array" });
@@ -1013,11 +1049,19 @@ app.delete("/api/missing-files", (req, res) => {
   let removed = 0;
   try {
     for (const p of paths) {
-      const row = db
+      const sRow = db
         .prepare(`SELECT missing_since FROM sources WHERE source_path = ?`)
         .get(p) as { missing_since: number | null } | undefined;
-      if (row && row.missing_since != null) {
+      if (sRow && sRow.missing_since != null) {
         deleteSource(db, p);
+        removed++;
+        continue;
+      }
+      const aRow = db
+        .prepare(`SELECT missing_since FROM file_aliases WHERE path = ?`)
+        .get(p) as { missing_since: number | null } | undefined;
+      if (aRow && aRow.missing_since != null) {
+        db.prepare(`DELETE FROM file_aliases WHERE path = ?`).run(p);
         removed++;
       }
     }

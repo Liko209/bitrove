@@ -19,7 +19,7 @@ type ItemStatus =
   | "ingested"
   | "skipped-cached"
   | "skipped-mtime-touched"
-  | "skipped-duplicate"
+  | "aliased-duplicate"
   | "skipped-unsupported"
   | "error";
 
@@ -58,7 +58,7 @@ const LOG_ICON: Record<ItemStatus, { ch: string; cls: string }> = {
   ingested: { ch: "+", cls: "text-stone-500" },
   "skipped-cached": { ch: "↻", cls: "text-stone-400" },
   "skipped-mtime-touched": { ch: "↻", cls: "text-stone-400" },
-  "skipped-duplicate": { ch: "=", cls: "text-amber-600" },
+  "aliased-duplicate": { ch: "=", cls: "text-sky-600" },
   "skipped-unsupported": { ch: "—", cls: "text-stone-400" },
   error: { ch: "✗", cls: "text-rose-600" },
 };
@@ -280,15 +280,17 @@ export default function JobProgress({
         );
       })()}
 
-      {/* ── Duplicate summary (terminal) ───────────────────────────────── */}
+      {/* ── Alias summary (terminal) ───────────────────────────────────── */}
       {isTerminal && dupSummary && dupSummary.count > 0 && (
-        <div className="px-6 py-3 bg-amber-50 border-b border-amber-200 text-sm text-amber-900">
+        <div className="px-6 py-3 bg-sky-50 border-b border-sky-200 text-sm text-sky-900">
           <div className="flex items-baseline gap-2 mb-1">
             <span className="font-semibold">
               {dupSummary.count.toLocaleString()}{" "}
-              duplicate file{dupSummary.count === 1 ? "" : "s"} skipped
+              file{dupSummary.count === 1 ? "" : "s"} linked as aliases
             </span>
-            <span className="text-xs text-amber-700">— identical content already in library</span>
+            <span className="text-xs text-sky-700">
+              — identical content was already indexed; we point search at this path too
+            </span>
           </div>
           {dupSummary.samples.length > 0 && (
             <ul className="text-xs font-mono space-y-0.5 mt-1">
@@ -296,13 +298,13 @@ export default function JobProgress({
                 const a = s.path.slice(s.path.lastIndexOf("/") + 1);
                 const b = s.duplicateOf.slice(s.duplicateOf.lastIndexOf("/") + 1);
                 return (
-                  <li key={s.path} className="truncate" title={`${s.path}\n= ${s.duplicateOf}`}>
-                    {a} <span className="text-amber-600">=</span> {b}
+                  <li key={s.path} className="truncate" title={`${s.path}\n→ ${s.duplicateOf}`}>
+                    {a} <span className="text-sky-600">→</span> {b}
                   </li>
                 );
               })}
               {dupSummary.count > 3 && (
-                <li className="text-amber-700 not-italic">+ {dupSummary.count - 3} more</li>
+                <li className="text-sky-700 not-italic">+ {dupSummary.count - 3} more</li>
               )}
             </ul>
           )}
