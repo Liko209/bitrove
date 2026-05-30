@@ -70,7 +70,7 @@ export default function App() {
           </nav>
           <div className="ml-auto flex items-center gap-3 app-no-drag">
             <GlobalJobIndicator />
-            <div className="text-xs text-stone-500">v0.0.4</div>
+            <div className="text-xs text-stone-500">v{__APP_VERSION__}</div>
           </div>
         </div>
       </header>
