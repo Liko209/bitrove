@@ -80,7 +80,7 @@ export default function Settings() {
   if (err && !data) {
     return (
       <div className="max-w-3xl mx-auto">
-        <h1 className="font-serif-display text-4xl text-stone-900 mb-2">Settings</h1>
+        <h1 className="t-display mb-3">Settings</h1>
         <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded text-sm">
           {err}
         </div>
@@ -105,7 +105,7 @@ export default function Settings() {
   return (
     <div className="max-w-3xl mx-auto pb-12">
       <div className="flex items-baseline justify-between mb-2">
-        <h1 className="font-serif-display text-4xl text-stone-900">Settings</h1>
+        <h1 className="t-display">Settings</h1>
         <button
           onClick={resetToDefaults}
           className="text-xs text-stone-500 hover:text-stone-900 underline"
@@ -120,7 +120,7 @@ export default function Settings() {
       </p>
 
       <section className="mb-10">
-        <h2 className="text-sm font-semibold text-stone-900 uppercase tracking-wider mb-3">
+        <h2 className="t-section mb-3">
           File types to skip when scanning a folder
         </h2>
         <p className="text-xs text-stone-500 mb-4">
@@ -156,7 +156,7 @@ export default function Settings() {
       </section>
 
       <section className="mb-10">
-        <h2 className="text-sm font-semibold text-stone-900 uppercase tracking-wider mb-3">
+        <h2 className="t-section mb-3">
           Folder names to skip
         </h2>
         <p className="text-xs text-stone-500 mb-4">
@@ -203,7 +203,7 @@ export default function Settings() {
         </div>
       </section>
 
-      <div className="sticky bottom-0 -mx-4 px-4 py-3 bg-stone-50/95 backdrop-blur border-t border-stone-200 flex items-center gap-3">
+      <div className="sticky bottom-0 -mx-4 px-4 pt-8 pb-4 bg-gradient-to-t from-stone-50 via-stone-50/90 to-stone-50/0 flex items-center gap-3">
         <span className="text-xs text-stone-500">
           {status === "saving" && "Saving…"}
           {status === "saved" && (

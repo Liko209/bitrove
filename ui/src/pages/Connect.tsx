@@ -84,7 +84,7 @@ export default function Connect() {
   return (
     <div>
       <div className="flex items-baseline mb-6">
-        <h1 className="font-serif-display text-4xl text-stone-900">Connect agents</h1>
+        <h1 className="t-display">Connect agents</h1>
         <span className="ml-3 text-stone-500 text-sm">
           Let AI tools search your knowledge base.
         </span>
@@ -163,7 +163,7 @@ export default function Connect() {
 
       {/* ── Manual (any MCP client) ────────────────────────────────── */}
       <section className="mb-10">
-        <h2 className="text-sm font-semibold text-stone-900 uppercase tracking-wider mb-3">
+        <h2 className="t-section mb-3">
           Other MCP clients
         </h2>
         <p className="text-sm text-stone-600 mb-3">
@@ -174,7 +174,7 @@ export default function Connect() {
 
       {/* ── REST API ───────────────────────────────────────────────── */}
       <section>
-        <h2 className="text-sm font-semibold text-stone-900 uppercase tracking-wider mb-3">
+        <h2 className="t-section mb-3">
           REST API
         </h2>
         <p className="text-sm text-stone-600 mb-3">

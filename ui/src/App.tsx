@@ -52,11 +52,11 @@ export default function App() {
     <div className="min-h-full flex flex-col">
       <div className="sticky top-0 z-10">
         <header className="border-b border-stone-200 bg-white app-drag">
-          {/* macOS traffic lights sit at top-left of the window. We pad to
-              ~80px on the left to clear them, and lock header height to
-              52px so the "Bitrove" wordmark + nav items vertically align
-              with the lights' midline. */}
-          <div className="max-w-7xl mx-auto pl-[88px] pr-6 h-[52px] flex items-center gap-6">
+          {/* main.ts pins the macOS traffic lights at {x:20, y:18}, which
+              centers their 12px bullets on y=24. Header is h-12 (48px),
+              so its flex-items-center row also centers on y=24. Wordmark
+              + nav now sit on the same horizontal axis as the lights. */}
+          <div className="max-w-7xl mx-auto pl-[88px] pr-6 h-12 flex items-center gap-6">
             <Link
               to="/"
               className="text-[15px] font-semibold text-stone-900 tracking-tight hover:text-stone-700 transition-colors app-no-drag"

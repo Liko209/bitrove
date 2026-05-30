@@ -105,7 +105,7 @@ export default function Library() {
   return (
     <div>
       <div className="flex items-baseline flex-wrap gap-3 mb-6">
-        <h1 className="font-serif-display text-4xl text-stone-900">Library</h1>
+        <h1 className="t-display">Library</h1>
         {data && (
           <span className="text-stone-500 text-sm">
             {data.total_files.toLocaleString()} files · {data.total_categories} {mode === "topic" ? "topics" : "folders"}

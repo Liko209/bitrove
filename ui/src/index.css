@@ -24,18 +24,74 @@ body {
   color: #1c1917;
 }
 
-/* Editorial serif for page titles + stat numbers — system "New York" on
-   macOS gives that Notion/Linear hero-heading feel without shipping a
-   web font. Falls back to Georgia / Times on other platforms. */
+/* ── Type system ─────────────────────────────────────────────────
+   One scale, used everywhere. Editorial serif for page titles only;
+   sans-serif for everything else. Stops the "every page invents its
+   own H1 size" drift the codebase had after a few rounds of polish.
+
+   Hierarchy:
+     .t-display  page hero    Editorial serif, 36px, tight
+     .t-section  eyebrow      Sans, 10px uppercase + tracked
+     .t-h2       card heading Sans, 15px semibold (page subheadings)
+     .t-body     body         Sans, 14px (default; usually inherited)
+     .t-meta     secondary    Sans, 12px stone-500
+     .t-mono     code / path  Mono, 12px tabular-nums
+
+   Use these classes rather than re-rolling text-2xl / text-sm etc.
+   Tailwind utilities still work for layout (spacing / color), but
+   typographic decisions belong here. */
+
+.t-display {
+  font-family: "New York", "Newsreader", "Lyon Text", "Instrument Serif", Georgia,
+    "Times New Roman", serif;
+  font-size: 36px;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  color: #1c1917;
+}
+
+.t-section {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #57534e;
+}
+
+.t-h2 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: #1c1917;
+}
+
+.t-body {
+  font-size: 14px;
+  line-height: 1.55;
+  color: #44403c;
+}
+
+.t-meta {
+  font-size: 12px;
+  color: #78716c;
+}
+
+.t-mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", "Geist Mono",
+    "JetBrains Mono", monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Legacy aliases — kept while existing call sites migrate. Do not use
+   in new code. */
 .font-serif-display {
   font-family: "New York", "Newsreader", "Lyon Text", "Instrument Serif", Georgia,
     "Times New Roman", serif;
   letter-spacing: -0.025em;
   line-height: 1.1;
 }
-
-/* All-caps micro-labels used by tags / status pills / section eyebrows.
-   Saves repeating the same three utilities everywhere. */
 .label-eyebrow {
   text-transform: uppercase;
   letter-spacing: 0.08em;

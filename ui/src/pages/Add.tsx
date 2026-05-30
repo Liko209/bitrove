@@ -207,7 +207,7 @@ export default function Add() {
 
   return (
     <div className="max-w-3xl mx-auto">
-      <h1 className="font-serif-display text-4xl text-stone-900 mb-3">Add to your library</h1>
+      <h1 className="t-display mb-3">Add to your library</h1>
       <p className="text-stone-600 text-[15px] leading-relaxed max-w-2xl">
         Pick a place on your Mac. Bitrove will read the documents inside, index them locally,
         and make them searchable to your AI agents — nothing leaves this Mac.
@@ -222,7 +222,7 @@ export default function Add() {
       </p>
 
       <section className="mb-10">
-        <h2 className="text-sm font-semibold text-stone-900 uppercase tracking-wider mb-3">
+        <h2 className="t-section mb-3">
           Recommended on this Mac
         </h2>
         <div className="space-y-2">
@@ -244,7 +244,7 @@ export default function Add() {
       </section>
 
       <section className="mb-10">
-        <h2 className="text-sm font-semibold text-stone-900 uppercase tracking-wider mb-3">
+        <h2 className="t-section mb-3">
           Or pick something else
         </h2>
         <div className="space-y-2">
@@ -290,7 +290,7 @@ export default function Add() {
 
       {indexed.length > 0 && (
         <section>
-          <h2 className="text-sm font-semibold text-stone-900 uppercase tracking-wider mb-3">
+          <h2 className="t-section mb-3">
             Already in your library
           </h2>
           <div className="bg-white border border-stone-200 rounded-xl divide-y divide-stone-100">

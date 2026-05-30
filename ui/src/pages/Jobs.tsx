@@ -59,7 +59,7 @@ export default function Jobs() {
   return (
     <div>
       <div className="flex items-baseline mb-6">
-        <h1 className="font-serif-display text-4xl text-stone-900">Jobs</h1>
+        <h1 className="t-display">Jobs</h1>
         <span className="ml-3 text-stone-500 text-sm">
           {active.length} active · {recent.length} recent · {jobs.length} total
         </span>

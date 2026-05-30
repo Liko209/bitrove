@@ -21,6 +21,7 @@ import { useJobs } from "../lib/useJobs.ts";
 import {
   UpdateFooter,
 } from "../components/UpdateSection.tsx";
+import { BookIcon, FolderOpenIcon } from "../components/icons.tsx";
 
 type ModelStatus = {
   id: "embed" | "rerank";
@@ -185,7 +186,7 @@ export default function Home() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <h1 className="font-serif-display text-4xl text-stone-900 mb-1">Welcome back</h1>
+      <h1 className="t-display mb-2">Welcome back</h1>
       <p className="text-stone-600 text-sm mb-8">
         Your private knowledge layer is{" "}
         {servicesOk ? (
@@ -223,7 +224,7 @@ export default function Home() {
 
       {active.length > 0 && (
         <section className="mb-8">
-          <h2 className="text-sm font-semibold text-stone-900 uppercase tracking-wider mb-3">
+          <h2 className="t-section mb-3">
             Happening now
           </h2>
           <div className="space-y-3">
@@ -235,7 +236,7 @@ export default function Home() {
       )}
 
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-stone-900 uppercase tracking-wider mb-3">
+        <h2 className="t-section mb-3">
           Quick actions
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -244,7 +245,7 @@ export default function Home() {
             className="block bg-white rounded-xl border border-stone-200 hover:border-stone-400 hover:shadow-sm transition p-5"
           >
             <div className="flex items-start gap-3">
-              <div className="text-2xl">📂</div>
+              <FolderOpenIcon size={22} className="text-stone-500 shrink-0" />
               <div className="flex-1">
                 <div className="font-medium text-stone-900">Add more sources</div>
                 <div className="text-sm text-stone-500 mt-0.5">
@@ -259,7 +260,7 @@ export default function Home() {
             className="block bg-white rounded-xl border border-stone-200 hover:border-stone-400 hover:shadow-sm transition p-5"
           >
             <div className="flex items-start gap-3">
-              <div className="text-2xl">📚</div>
+              <BookIcon size={22} className="text-stone-500 shrink-0" />
               <div className="flex-1">
                 <div className="font-medium text-stone-900">Browse your library</div>
                 <div className="text-sm text-stone-500 mt-0.5">
@@ -273,7 +274,7 @@ export default function Home() {
 
       {models && models.catalog.length > 0 && (
         <section className="mb-8">
-          <h2 className="text-sm font-semibold text-stone-900 uppercase tracking-wider mb-3">
+          <h2 className="t-section mb-3">
             On-device models
           </h2>
           <div className="bg-white border border-stone-200 rounded-xl divide-y divide-stone-100">
@@ -295,7 +296,7 @@ export default function Home() {
       )}
 
       <section>
-        <h2 className="text-sm font-semibold text-stone-900 uppercase tracking-wider mb-3">
+        <h2 className="t-section mb-3">
           AI tools
         </h2>
         <Link
@@ -303,7 +304,9 @@ export default function Home() {
           className="block bg-white rounded-xl border border-stone-200 hover:border-stone-400 hover:shadow-sm transition p-5"
         >
           <div className="flex items-center gap-4">
-            <div className="text-2xl">🤖</div>
+            <div className="shrink-0 w-10 h-10 rounded-lg bg-stone-100 text-stone-600 flex items-center justify-center font-mono text-xs font-semibold">
+              AI
+            </div>
             <div className="flex-1 min-w-0">
               <div className="font-medium text-stone-900">
                 {claudeConnected

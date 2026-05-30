@@ -282,6 +282,11 @@ async function createWindow() {
     title: "Bitrove",
     backgroundColor: "#fafaf9",
     titleBarStyle: "hiddenInset",
+    // Park the traffic lights so their vertical center sits at y=24px —
+    // matching the nav row's center inside the 48px header. macOS bullets
+    // are ~12px tall, so y=18 puts their midline at 24. The 20px x offset
+    // mirrors Finder / Mail.
+    trafficLightPosition: { x: 20, y: 18 },
     show: false,
     webPreferences: {
       // Preload is emitted as CJS with a .cjs extension to side-step the

@@ -71,7 +71,7 @@ export default function Agents() {
 
   return (
     <div className="max-w-3xl mx-auto">
-      <h1 className="font-serif-display text-4xl text-stone-900 mb-2">AI tools</h1>
+      <h1 className="t-display mb-3">AI tools</h1>
       <p className="text-stone-600 text-sm mb-8">
         Let your favourite AI agents read and search your library. Bitrove never sends
         the documents themselves — it just lets the agent ask "what does Liko have
