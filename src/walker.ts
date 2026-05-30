@@ -9,9 +9,14 @@
 //    其他全部跳过(源码、data/、test/、生成物等都不是"知识")
 
 import { readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { join, extname } from "node:path";
 
-export type WalkOpts = { excludes: string[] };
+export type WalkOpts = {
+  excludes: string[];
+  // Optional file-extension allowlist filter. Each entry is lowercase WITH
+  // the leading dot, e.g. ".js". A path whose extname matches is skipped.
+  excludeExts?: string[];
+};
 
 const HIDDEN_NAME = /^\./;
 const PLACEHOLDER = /\.icloud$/i;
@@ -55,6 +60,10 @@ export async function* walkSmart(
     } else if (e.isFile()) {
       if (PLACEHOLDER.test(e.name)) continue;
       if (currentRepoRoot && !isRepoAllowed(full, currentRepoRoot)) continue;
+      if (opts.excludeExts && opts.excludeExts.length > 0) {
+        const ext = extname(e.name).toLowerCase();
+        if (ext && opts.excludeExts.includes(ext)) continue;
+      }
       yield full;
     }
   }

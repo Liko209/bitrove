@@ -32,6 +32,14 @@ import {
   shouldStop,
 } from "./jobs.ts";
 import { walkSmart } from "./walker.ts";
+import {
+  readIngestSettings,
+  writeIngestSettings,
+  foldersToWalkerExcludes,
+  SUPPORTED_TYPES,
+  DEFAULT_EXCLUDED_EXTS,
+  DEFAULT_EXCLUDED_FOLDERS,
+} from "./settings.ts";
 import { deriveCategory, fileTypeBucket } from "./category.ts";
 import {
   CATEGORIES as TAG_CATEGORIES,
@@ -71,12 +79,25 @@ app.get("/api/source-preview", async (req, res) => {
   if (!path) return res.status(400).json({ error: "missing path" });
   if (!existsSync(path)) return res.status(404).json({ error: "path not found" });
 
-  const excludes = [...DEFAULT_EXCLUDES];
+  // Preview always shows the *complete* picture — i.e. it deliberately
+  // does NOT pre-apply the user's ext exclusion list. The UI overlays
+  // those exclusions on top and lets the user toggle them per-scan.
+  // We do still honor the folder excludes because those are universally
+  // unwanted (node_modules, .venv, …) and skipping them is a perf win.
+  const settings = await readIngestSettings();
+  const excludes = [
+    ...DEFAULT_EXCLUDES,
+    ...foldersToWalkerExcludes(settings.excludedFolders),
+  ];
   let text = 0;
   let catalog = 0;
   let skipped = 0;
   let totalBytes = 0;
-  const byExt: Record<string, number> = {};
+  // For each extension we track both how many files we found AND how
+  // many of those would actually get indexed (text or catalog). That
+  // lets the UI compute the delta accurately when the user toggles an
+  // extension on or off in the modal.
+  const byExt: Record<string, { count: number; indexable: number }> = {};
   const HARD_CAP = 200000;
   let seen = 0;
 
@@ -96,13 +117,16 @@ app.get("/api/source-preview", async (req, res) => {
       seen++;
       if (seen > HARD_CAP) break;
       const ext = extname(p).toLowerCase() || "(noext)";
-      byExt[ext] = (byExt[ext] ?? 0) + 1;
       const kind = classify(p);
       let size = 0;
       try {
         size = statSync(p).size;
         totalBytes += size;
       } catch {}
+      const extBucket = byExt[ext] ?? { count: 0, indexable: 0 };
+      extBucket.count++;
+      if (kind === "text" || kind === "catalog") extBucket.indexable++;
+      byExt[ext] = extBucket;
       if (kind === "text") text++;
       else if (kind === "catalog") catalog++;
       else skipped++;
@@ -130,9 +154,20 @@ app.get("/api/source-preview", async (req, res) => {
 
   const estimatedSeconds = Math.max(5, Math.round(text * 1.0 + catalog * 0.05));
   const topExtensions = Object.entries(byExt)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
-    .map(([ext, count]) => ({ ext, count }));
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, 12)
+    .map(([ext, v]) => ({ ext, count: v.count, indexable: v.indexable }));
+  // Per-extension summary restricted to the user's default-excluded set, so
+  // the UI can compute the *effective* indexable count after the user
+  // toggles any of them back on without having to wait for the top-12 cap
+  // to include every excluded ext.
+  const excludedByExt = settings.excludedExts
+    .map((ext) => ({
+      ext,
+      count: byExt[ext]?.count ?? 0,
+      indexable: byExt[ext]?.indexable ?? 0,
+    }))
+    .filter((e) => e.count > 0);
   const topFolders = [...folderStats.values()]
     .sort((a, b) => b.indexable - a.indexable || b.bytes - a.bytes)
     .slice(0, TOP_FOLDERS_LIMIT);
@@ -149,7 +184,37 @@ app.get("/api/source-preview", async (req, res) => {
     topExtensions,
     topFolders,
     sampleFiles: samples,
+    // Echo the user's current default-exclude list so the UI can dim the
+    // corresponding chips without a second round-trip.
+    excludedExts: settings.excludedExts,
+    excludedByExt,
   });
+});
+
+// ── /api/settings/ingest ──────────────────────────────────
+app.get("/api/settings/ingest", async (_req, res) => {
+  const current = await readIngestSettings();
+  res.json({
+    current,
+    defaults: {
+      excludedExts: DEFAULT_EXCLUDED_EXTS,
+      excludedFolders: DEFAULT_EXCLUDED_FOLDERS,
+    },
+    supportedTypes: SUPPORTED_TYPES,
+  });
+});
+
+app.put("/api/settings/ingest", async (req, res) => {
+  try {
+    const next = req.body as { excludedExts?: string[]; excludedFolders?: string[] };
+    const saved = await writeIngestSettings({
+      excludedExts: Array.isArray(next.excludedExts) ? next.excludedExts : [],
+      excludedFolders: Array.isArray(next.excludedFolders) ? next.excludedFolders : [],
+    });
+    res.json(saved);
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
 });
 
 // ── /api/agents/claude-config ─────────────────────────────
@@ -496,6 +561,13 @@ app.post("/api/ingest/scan", async (req, res) => {
   const root = req.body?.root as string;
   const force = Boolean(req.body?.force);
   const extraExcludes = (req.body?.excludes ?? []) as string[];
+  // Per-scan override: "include these extensions even though Settings has
+  // them on the exclude list". Used by the scan-confirm modal when the
+  // user toggles an excluded chip back on.
+  const includeExtsRaw = (req.body?.extraIncludeExts ?? []) as string[];
+  const includeExts = new Set(
+    includeExtsRaw.map((s) => s.trim().toLowerCase()).map((s) => (s.startsWith(".") ? s : "." + s)),
+  );
   if (!root || !existsSync(root)) {
     return res.status(400).json({ error: "body.root must be an existing directory" });
   }
@@ -504,10 +576,18 @@ app.post("/api/ingest/scan", async (req, res) => {
 
   (async () => {
     const t0 = Date.now();
-    const excludes = [...DEFAULT_EXCLUDES, ...extraExcludes];
+    const settings = await readIngestSettings();
+    const excludes = [
+      ...DEFAULT_EXCLUDES,
+      ...foldersToWalkerExcludes(settings.excludedFolders),
+      ...extraExcludes,
+    ];
+    // Apply ext exclusions minus whatever the user explicitly re-enabled
+    // for this scan via extraIncludeExts.
+    const excludeExts = settings.excludedExts.filter((e) => !includeExts.has(e));
     // 第一遍枚举(git-aware: 仓库内只保留 README + docs/)
     const queue: string[] = [];
-    for await (const p of walkSmart(root, { excludes })) {
+    for await (const p of walkSmart(root, { excludes, excludeExts })) {
       if (classify(p) !== "skip") queue.push(p);
     }
     emitJob(job.id, { type: "started", total: queue.length });

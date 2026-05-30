@@ -131,6 +131,10 @@ export async function startAdmin(): Promise<void> {
     // mode because Resources/app/admin/index.mjs is far from the UI bundle
     // (Resources/app/ui-dist/). Tell it explicitly.
     BITROVE_UI_DIST: uiDistDir(),
+    // settings.ts persists ingest preferences here. Without this env the
+    // admin would fall back to cwd/data, which is read-only in packaged
+    // builds.
+    BITROVE_USER_DATA: app.getPath("userData"),
   };
 
   // In packaged mode the admin entry runs inside Electron's bundled Node;

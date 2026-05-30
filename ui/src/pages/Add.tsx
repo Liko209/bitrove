@@ -7,7 +7,7 @@
 //   3. Currently indexed — what's already in the library + actions.
 
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, type SourceRow } from "../lib/api.ts";
 import { shortPath } from "../lib/format.ts";
 import ScanConfirmModal from "../components/ScanConfirmModal.tsx";
@@ -142,11 +142,11 @@ export default function Add() {
     if (folder) setConfirmPath(folder);
   }
 
-  async function confirmStartScan() {
+  async function confirmStartScan(extraIncludeExts: string[]) {
     if (!confirmPath) return;
     setBusy(confirmPath);
     try {
-      await api.ingestScan(confirmPath);
+      await api.ingestScan(confirmPath, { extraIncludeExts });
       setConfirmPath(null);
       // Send the user where they can see progress
       navigate("/jobs");
@@ -162,9 +162,17 @@ export default function Add() {
   return (
     <div className="max-w-3xl mx-auto">
       <h1 className="text-2xl font-semibold text-stone-900 mb-2">Add to your library</h1>
-      <p className="text-stone-600 text-sm mb-8">
+      <p className="text-stone-600 text-sm">
         Pick a place on your Mac. Bitrove will read the documents inside, index them locally,
         and make them searchable to your AI agents — nothing leaves this Mac.
+      </p>
+      <p className="text-stone-500 text-xs mb-8 mt-2">
+        Code source files and folders like <code className="font-mono">node_modules</code>{" "}
+        are skipped by default.{" "}
+        <Link to="/settings" className="underline hover:text-stone-900">
+          Adjust filters
+        </Link>
+        .
       </p>
 
       <section className="mb-10">

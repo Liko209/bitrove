@@ -3,7 +3,8 @@
 // be indexed before they commit. Also flags permission errors up-front so
 // users aren't dropped into a half-finished scan that quietly stops.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../lib/api.ts";
 import { bytes, formatDurationSeconds, shortPath } from "../lib/format.ts";
 import { openSettingsFor, usePermission } from "./PermissionStatus.tsx";
@@ -17,15 +18,21 @@ export default function ScanConfirmModal({
 }: {
   path: string;
   onCancel: () => void;
-  onConfirm: () => void;
+  // Receives the list of extensions the user explicitly re-enabled for
+  // this scan (i.e. ones that are on the default-exclude list but the
+  // user wants included this time anyway).
+  onConfirm: (extraIncludeExts: string[]) => void;
 }) {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Extensions the user has clicked back ON for this scan.
+  const [overrides, setOverrides] = useState<Set<string>>(new Set());
   const { perm, recheck } = usePermission(path);
 
   useEffect(() => {
     setPreview(null);
     setErr(null);
+    setOverrides(new Set());
     // Only attempt the preview when we know we have access. If the user
     // grants permission and clicks Re-check, the new "granted" state will
     // re-fire this effect.
@@ -39,10 +46,36 @@ export default function ScanConfirmModal({
   const denied = perm.state === "denied";
   const checking = perm.state === "checking";
 
-  const totalIndexable = preview ? preview.text + preview.catalog : 0;
+  const excludedSet = useMemo(
+    () => new Set(preview?.excludedExts ?? []),
+    [preview?.excludedExts],
+  );
+
+  // Default-excluded count (before any user override) and the count the
+  // user has *kept* excluded (i.e. didn't toggle back on).
+  const { excludedFromDefault, effectiveIndexable } = useMemo(() => {
+    if (!preview) return { excludedFromDefault: 0, effectiveIndexable: 0 };
+    const total = preview.text + preview.catalog;
+    let dropped = 0;
+    for (const e of preview.excludedByExt) {
+      if (!overrides.has(e.ext)) dropped += e.indexable;
+    }
+    return { excludedFromDefault: dropped, effectiveIndexable: Math.max(0, total - dropped) };
+  }, [preview, overrides]);
+
+  const totalIndexable = effectiveIndexable;
   const ratio = preview && preview.totalScanned > 0
     ? Math.round((totalIndexable / preview.totalScanned) * 100)
     : 0;
+
+  function toggleOverride(ext: string) {
+    setOverrides((prev) => {
+      const next = new Set(prev);
+      if (next.has(ext)) next.delete(ext);
+      else next.add(ext);
+      return next;
+    });
+  }
 
   return (
     <div
@@ -115,13 +148,19 @@ export default function ScanConfirmModal({
                     </span>
                   )}
                 </Bullet>
+                {excludedFromDefault > 0 && (
+                  <Bullet>
+                    Skipping{" "}
+                    <strong>{excludedFromDefault.toLocaleString()}</strong>{" "}
+                    files of code-like types you've set to exclude.{" "}
+                    <Link to="/settings" className="text-stone-900 underline hover:no-underline">
+                      Edit defaults
+                    </Link>
+                  </Bullet>
+                )}
                 <Bullet>
                   Estimated time:{" "}
                   <strong>{formatDurationSeconds(preview.estimatedSeconds)}</strong>
-                </Bullet>
-                <Bullet>
-                  Will skip code repos' source, <code>node_modules</code>,{" "}
-                  <code>.venv</code>, build outputs, and cached data.
                 </Bullet>
                 {preview.cappedAt && (
                   <Bullet warn>
@@ -179,18 +218,49 @@ export default function ScanConfirmModal({
 
               {preview.topExtensions.length > 0 && (
                 <div className="mt-4 pt-4 border-t border-stone-100">
-                  <div className="text-xs uppercase tracking-wider text-stone-500 mb-2">
-                    File types found
+                  <div className="flex items-baseline justify-between mb-2">
+                    <div className="text-xs uppercase tracking-wider text-stone-500">
+                      File types found
+                    </div>
+                    <div className="text-[10px] text-stone-400">
+                      tap a greyed type to include it this time
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
-                    {preview.topExtensions.map((e) => (
-                      <span
-                        key={e.ext}
-                        className="text-xs px-2 py-0.5 rounded-full bg-stone-100 text-stone-700 tabular-nums"
-                      >
-                        {e.ext} · {e.count}
-                      </span>
-                    ))}
+                    {preview.topExtensions.map((e) => {
+                      const isExcludedDefault = excludedSet.has(e.ext);
+                      const overridden = overrides.has(e.ext);
+                      const effectivelyOff = isExcludedDefault && !overridden;
+                      const onClick = isExcludedDefault
+                        ? () => toggleOverride(e.ext)
+                        : undefined;
+                      const base =
+                        "text-xs px-2 py-0.5 rounded-full tabular-nums transition";
+                      const cls = effectivelyOff
+                        ? "bg-stone-100 text-stone-400 line-through"
+                        : overridden
+                          ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                          : "bg-stone-100 text-stone-700";
+                      return (
+                        <button
+                          type="button"
+                          key={e.ext}
+                          onClick={onClick}
+                          disabled={!isExcludedDefault}
+                          title={
+                            effectivelyOff
+                              ? `${e.ext} is off by default. Click to include in this scan.`
+                              : overridden
+                                ? `${e.ext} is off by default but you've added it to this scan. Click to drop it again.`
+                                : `${e.ext} · ${e.count.toLocaleString()} files`
+                          }
+                          className={`${base} ${cls} ${isExcludedDefault ? "cursor-pointer hover:opacity-80" : "cursor-default"}`}
+                        >
+                          {e.ext} · {e.count.toLocaleString()}
+                          {overridden && <span className="ml-1">✓</span>}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -216,7 +286,7 @@ export default function ScanConfirmModal({
               Cancel
             </button>
             <button
-              onClick={onConfirm}
+              onClick={() => onConfirm([...overrides])}
               disabled={!preview || totalIndexable === 0 || perm.state !== "granted"}
               className="px-4 py-1.5 rounded-md text-sm font-medium bg-stone-900 text-white hover:bg-stone-700 disabled:opacity-40 disabled:cursor-not-allowed"
             >

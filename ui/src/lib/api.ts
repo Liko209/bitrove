@@ -113,7 +113,7 @@ export const api = {
       cappedAt: number | null;
       totalBytes: number;
       estimatedSeconds: number;
-      topExtensions: { ext: string; count: number }[];
+      topExtensions: { ext: string; count: number; indexable: number }[];
       topFolders: { name: string; indexable: number; skipped: number; bytes: number }[];
       sampleFiles: {
         path: string;
@@ -121,6 +121,8 @@ export const api = {
         kind: "text" | "catalog";
         size: number;
       }[];
+      excludedExts: string[];
+      excludedByExt: { ext: string; count: number; indexable: number }[];
     }>(`/api/source-preview?path=${encodeURIComponent(path)}`),
   classify: (onlyMissing = false) =>
     j<{ jobId: string }>("/api/classify", {
@@ -153,11 +155,31 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ paths, force }),
     }),
-  ingestScan: (root: string, force = false, excludes: string[] = []) =>
+  ingestScan: (
+    root: string,
+    opts: { force?: boolean; excludes?: string[]; extraIncludeExts?: string[] } = {},
+  ) =>
     j<{ jobId: string }>("/api/ingest/scan", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ root, force, excludes }),
+      body: JSON.stringify({
+        root,
+        force: opts.force ?? false,
+        excludes: opts.excludes ?? [],
+        extraIncludeExts: opts.extraIncludeExts ?? [],
+      }),
+    }),
+  getIngestSettings: () =>
+    j<{
+      current: { excludedExts: string[]; excludedFolders: string[] };
+      defaults: { excludedExts: string[]; excludedFolders: string[] };
+      supportedTypes: { group: string; description: string; exts: string[] }[];
+    }>("/api/settings/ingest"),
+  saveIngestSettings: (s: { excludedExts: string[]; excludedFolders: string[] }) =>
+    j<{ excludedExts: string[]; excludedFolders: string[] }>("/api/settings/ingest", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(s),
     }),
   listJobs: () => j<{ jobs: Job[] }>("/api/ingest/jobs"),
   getJob: (id: string) => j<Job>(`/api/ingest/jobs/${id}`),
