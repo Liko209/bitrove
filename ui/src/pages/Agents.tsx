@@ -6,7 +6,7 @@
 //   - Other tools: friendly explanation + reveal JSON on demand.
 
 import { useEffect, useState } from "react";
-import { api, type ClaudeConfigInfo } from "../lib/api.ts";
+import { api, type ClaudeConfigInfo, type Health } from "../lib/api.ts";
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -28,13 +28,16 @@ function CopyButton({ text }: { text: string }) {
 
 export default function Agents() {
   const [info, setInfo] = useState<ClaudeConfigInfo | null>(null);
+  const [health, setHealth] = useState<Health | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   async function load() {
     try {
-      setInfo(await api.claudeConfig());
+      const [i, h] = await Promise.all([api.claudeConfig(), api.health()]);
+      setInfo(i);
+      setHealth(h);
       setErr(null);
     } catch (e) {
       setErr((e as Error).message);
@@ -43,6 +46,8 @@ export default function Agents() {
 
   useEffect(() => {
     load();
+    const t = setInterval(load, 10000);
+    return () => clearInterval(t);
   }, []);
 
   const claudeCode = info?.detected.find((d) => !d.path.includes("claude_desktop_config"));
@@ -78,6 +83,53 @@ export default function Agents() {
           {err}
         </div>
       )}
+
+      {/* ── Local MCP server status ──────────────────────────────── */}
+      <section className="mb-8">
+        <div className="bg-white rounded-xl border border-stone-200 p-5">
+          <div className="flex items-start gap-3 mb-4">
+            <div className="text-2xl shrink-0">🛰️</div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="font-semibold text-stone-900">Local MCP server</div>
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  Ready
+                </span>
+              </div>
+              <div className="text-sm text-stone-600 mt-1">
+                AI agents launch this server on demand and ask it to search your library.
+                Nothing runs unless an agent connects.
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+            <ServiceDot
+              label="Search engine"
+              detail="Embeddings · port 8765"
+              healthy={!!health?.embed}
+            />
+            <ServiceDot
+              label="Relevance ranker"
+              detail="Reranker · port 8766"
+              healthy={!!health?.rerank}
+            />
+            <ServiceDot
+              label="Library API"
+              detail="REST · port 8770"
+              healthy={true}
+            />
+          </div>
+
+          <div className="text-xs text-stone-500">
+            Tools available to agents:{" "}
+            <code className="bg-stone-100 px-1.5 py-0.5 rounded">search</code>{" "}
+            <code className="bg-stone-100 px-1.5 py-0.5 rounded">list_sources</code>{" "}
+            <code className="bg-stone-100 px-1.5 py-0.5 rounded">stats</code>
+          </div>
+        </div>
+      </section>
 
       {/* ── Claude Code ──────────────────────────────────────────── */}
       <section className="mb-6">
@@ -185,6 +237,36 @@ export default function Agents() {
 }
 
 type AppState = "not-installed" | "ready-to-connect" | "connected" | "info";
+
+function ServiceDot({
+  label,
+  detail,
+  healthy,
+}: {
+  label: string;
+  detail: string;
+  healthy: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-2.5 p-2.5 rounded-lg bg-stone-50 border border-stone-100">
+      <span className="relative h-2 w-2 shrink-0">
+        {healthy && (
+          <span className="absolute inset-0 rounded-full bg-emerald-500 animate-ping opacity-50" />
+        )}
+        <span
+          className={
+            "relative inline-flex h-2 w-2 rounded-full " +
+            (healthy ? "bg-emerald-500" : "bg-stone-400")
+          }
+        />
+      </span>
+      <div className="min-w-0">
+        <div className="text-xs font-medium text-stone-800 truncate">{label}</div>
+        <div className="text-[10px] text-stone-500 truncate">{detail}</div>
+      </div>
+    </div>
+  );
+}
 
 function AppCard({
   icon,

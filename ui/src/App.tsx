@@ -14,6 +14,7 @@ const NAV = [
   { to: "/", label: "Home" },
   { to: "/library", label: "Library" },
   { to: "/add", label: "Add" },
+  { to: "/jobs", label: "Activity" },
   { to: "/agents", label: "AI tools" },
 ];
 
@@ -60,21 +61,15 @@ export default function App() {
             </Link>
             <nav className="flex gap-1 app-no-drag">
               {NAV.map((n) => (
-                <NavLink key={n.to} {...n} />
+                <NavLink
+                  key={n.to}
+                  {...n}
+                  badge={n.to === "/jobs" ? active.length : undefined}
+                />
               ))}
             </nav>
             <div className="ml-auto flex items-center gap-3 app-no-drag">
               <GlobalJobIndicator />
-              {/* Active jobs are visible from the indicator above, plus on Home.
-                  Hidden technical pages remain accessible by URL: /jobs /sources /dashboard. */}
-              {active.length > 0 && (
-                <Link
-                  to="/jobs"
-                  className="text-xs text-stone-500 hover:text-stone-900 underline-offset-2 hover:underline"
-                >
-                  Activity
-                </Link>
-              )}
               <div className="text-xs text-stone-500">v{__APP_VERSION__}</div>
             </div>
           </div>
