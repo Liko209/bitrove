@@ -19,7 +19,8 @@
     "build:admin": "node scripts/build-admin.mjs",
     "vendor:llama": "node scripts/vendor-llama.mjs",
     "rebuild": "electron-rebuild",
-    "app:dist": "npm run build:admin && npm run electron:build && electron-builder"
+    "app:dist": "npm run build:admin && npm run electron:build && electron-builder",
+    "release": "node scripts/release.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
