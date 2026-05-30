@@ -177,6 +177,14 @@ export const api = {
         watchAfterScan: opts.watchAfterScan ?? true,
       }),
     }),
+  // First-run wizard support — list the top-level subdirs of a path
+  // so the user can drill into ~/Documents/Notes instead of indexing
+  // all of Documents in one shot.
+  listSubdirs: (path: string) =>
+    j<{
+      root: string;
+      subdirs: { name: string; path: string; estimate: number; size: number }[];
+    }>(`/api/list-subdirs?path=${encodeURIComponent(path)}`),
   // Watched-roots CRUD + missing-file reconciliation.
   listWatchedRoots: () =>
     j<{

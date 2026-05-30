@@ -11,6 +11,8 @@ type StreamEvent = {
   error?: string;
   ingested?: number;
   errors?: number;
+  duplicates?: number;
+  duplicateSamples?: { path: string; duplicateOf: string }[];
 };
 
 type ItemStatus =
@@ -87,6 +89,10 @@ export default function JobProgress({
   const [log, setLog] = useState<LogEntry[]>([]);
   const [stopRequested, setStopRequested] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [dupSummary, setDupSummary] = useState<{
+    count: number;
+    samples: { path: string; duplicateOf: string }[];
+  } | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -98,6 +104,12 @@ export default function JobProgress({
         return;
       }
       const e = ev as StreamEvent;
+      if ((e.type === "done" || e.type === "stopped") && (e.duplicates ?? 0) > 0) {
+        setDupSummary({
+          count: e.duplicates ?? 0,
+          samples: e.duplicateSamples ?? [],
+        });
+      }
       setJob((prev) =>
         prev
           ? {
@@ -267,6 +279,35 @@ export default function JobProgress({
           </div>
         );
       })()}
+
+      {/* ── Duplicate summary (terminal) ───────────────────────────────── */}
+      {isTerminal && dupSummary && dupSummary.count > 0 && (
+        <div className="px-6 py-3 bg-amber-50 border-b border-amber-200 text-sm text-amber-900">
+          <div className="flex items-baseline gap-2 mb-1">
+            <span className="font-semibold">
+              {dupSummary.count.toLocaleString()}{" "}
+              duplicate file{dupSummary.count === 1 ? "" : "s"} skipped
+            </span>
+            <span className="text-xs text-amber-700">— identical content already in library</span>
+          </div>
+          {dupSummary.samples.length > 0 && (
+            <ul className="text-xs font-mono space-y-0.5 mt-1">
+              {dupSummary.samples.slice(0, 3).map((s) => {
+                const a = s.path.slice(s.path.lastIndexOf("/") + 1);
+                const b = s.duplicateOf.slice(s.duplicateOf.lastIndexOf("/") + 1);
+                return (
+                  <li key={s.path} className="truncate" title={`${s.path}\n= ${s.duplicateOf}`}>
+                    {a} <span className="text-amber-600">=</span> {b}
+                  </li>
+                );
+              })}
+              {dupSummary.count > 3 && (
+                <li className="text-amber-700 not-italic">+ {dupSummary.count - 3} more</li>
+              )}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* ── Stopped help ───────────────────────────────────────────────── */}
       {job.status === "stopped" && (

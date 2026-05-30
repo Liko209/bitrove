@@ -7,6 +7,7 @@ import JobProgress from "../components/JobProgress.tsx";
 import { UpdateFooter } from "../components/UpdateSection.tsx";
 import { BookIcon, FolderOpenIcon } from "../components/icons.tsx";
 import { useJobs } from "../lib/useJobs.ts";
+import FirstRunWizard from "../components/FirstRunWizard.tsx";
 
 type Mode = "folder" | "topic";
 
@@ -171,16 +172,21 @@ function WatchedRootsSection() {
           const lastDone = r.last_completed_at
             ? new Date(r.last_completed_at).toLocaleString()
             : "—";
+          const dirty = live?.dirty ?? 0;
           const stateLabel = !r.watch_enabled
             ? "Paused"
             : live?.scanning
-              ? "Scanning"
-              : "Watching";
+              ? "Scanning…"
+              : dirty > 0
+                ? `${dirty} change${dirty === 1 ? "" : "s"} pending`
+                : "Watching";
           const stateDot = !r.watch_enabled
             ? "bg-stone-300"
             : live?.scanning
               ? "bg-sky-500"
-              : "bg-emerald-500";
+              : dirty > 0
+                ? "bg-amber-500"
+                : "bg-emerald-500";
           return (
             <div key={r.path} className="px-4 py-3 flex items-center gap-3 text-sm">
               <span className={"w-1.5 h-1.5 rounded-full shrink-0 " + stateDot} />
@@ -363,6 +369,8 @@ export default function Library() {
   const [classifyJobId, setClassifyJobId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const { active } = useJobs(3000);
+  const [watchedCount, setWatchedCount] = useState<number | null>(null);
+  const [wizardDismissed, setWizardDismissed] = useState(false);
 
   async function load(m: Mode) {
     try {
@@ -373,6 +381,19 @@ export default function Library() {
       setErr((e as Error).message);
     }
   }
+
+  // Probe whether any watched roots exist — combined with empty library
+  // this is the trigger for the first-run wizard.
+  useEffect(() => {
+    let alive = true;
+    api
+      .listWatchedRoots()
+      .then((r) => alive && setWatchedCount(r.rows.length))
+      .catch(() => alive && setWatchedCount(0));
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     load(mode);
@@ -394,15 +415,33 @@ export default function Library() {
       ? data.groups.filter((g) => g.category.toLowerCase().includes(query.toLowerCase()))
       : data?.groups ?? [];
 
+  // First-run wizard renders only when: no indexed files, no watched
+  // roots, no in-flight jobs, and the user hasn't dismissed it this
+  // session. Once they kick off a scan it stops rendering naturally
+  // because `data` populates and `watchedCount` flips to >0.
+  const showWizard =
+    !wizardDismissed &&
+    data !== null &&
+    data.total_files === 0 &&
+    watchedCount === 0 &&
+    active.length === 0;
+
   return (
     <div>
       <SystemBar />
 
       <ActiveJobsBanner jobs={active} />
 
-      <WatchedRootsSection />
+      {showWizard && (
+        <FirstRunWizard
+          onSkip={() => setWizardDismissed(true)}
+          onLaunched={() => setWizardDismissed(true)}
+        />
+      )}
 
-      <MissingFilesSection />
+      {!showWizard && <WatchedRootsSection />}
+
+      {!showWizard && <MissingFilesSection />}
 
       <div className="flex items-baseline flex-wrap gap-3 mb-6">
         <h1 className="t-display">Library</h1>

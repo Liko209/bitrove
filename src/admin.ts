@@ -618,6 +618,8 @@ app.post("/api/ingest/scan", async (req, res) => {
     }
     let done = 0;
     let stoppedEarly = false;
+    let duplicateCount = 0;
+    const duplicateSamples: { path: string; duplicateOf: string }[] = [];
     for (const p of queue) {
       if (shouldStop(job.id)) {
         stoppedEarly = true;
@@ -627,6 +629,14 @@ app.post("/api/ingest/scan", async (req, res) => {
         force,
         watchedRoot: watchAfterScan ? root : undefined,
       });
+      if (r.status === "skipped-duplicate") {
+        duplicateCount++;
+        // Keep a tiny sample so the UI can show "e.g. invoice.pdf already
+        // existed at /Old/Backups/invoice.pdf" without dumping 100 items.
+        if (duplicateSamples.length < 5) {
+          duplicateSamples.push({ path: r.path, duplicateOf: r.duplicateOf });
+        }
+      }
       done++;
       emitJob(job.id, {
         type: "item",
@@ -645,6 +655,8 @@ app.post("/api/ingest/scan", async (req, res) => {
       total: queue.length,
       ingested: finalState.ingested,
       errors: finalState.errors,
+      duplicates: duplicateCount,
+      duplicateSamples,
       ms: Date.now() - t0,
     });
     // After the initial scan finishes (success or otherwise), bring the
@@ -867,6 +879,53 @@ if (existsSync(UI_DIST)) {
     res.sendFile(join(UI_DIST, "index.html"));
   });
 }
+
+// ── /api/list-subdirs ─────────────────────────────────────
+// Returns the immediate (top-level) subdirectories of a path, each with
+// a rough file-count estimate. Used by the first-run wizard so the
+// user can drill into ~/Documents/Notes instead of indexing all of
+// Documents. Capped + bounded so accidentally pointing at "/" stays
+// fast.
+app.get("/api/list-subdirs", async (req, res) => {
+  const root = (req.query.path as string) || "";
+  if (!root) return res.status(400).json({ error: "missing path" });
+  if (!existsSync(root)) return res.status(404).json({ error: "path not found" });
+  try {
+    const entries = await readdir(root, { withFileTypes: true });
+    const dirs = entries
+      .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+      .map((e) => e.name);
+
+    const settings = await readIngestSettings();
+    const excludedFolders = new Set(settings.excludedFolders);
+    const SAMPLE_CAP = 5000; // per-subdir entry cap for the estimate
+
+    const out: { name: string; path: string; estimate: number; size: number }[] = [];
+    for (const name of dirs) {
+      if (excludedFolders.has(name)) continue;
+      const path = join(root, name);
+      let estimate = 0;
+      let size = 0;
+      try {
+        for await (const p of walkSmart(path, {
+          excludes: foldersToWalkerExcludes(settings.excludedFolders),
+          excludeExts: settings.excludedExts,
+        })) {
+          estimate++;
+          if (estimate > SAMPLE_CAP) break;
+          try {
+            size += statSync(p).size;
+          } catch {}
+        }
+      } catch {}
+      out.push({ name, path, estimate, size });
+    }
+    out.sort((a, b) => b.estimate - a.estimate);
+    res.json({ root, subdirs: out });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
 
 // ── /api/watched-roots ────────────────────────────────────
 app.get("/api/watched-roots", (_req, res) => {
