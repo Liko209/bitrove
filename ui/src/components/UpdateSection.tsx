@@ -1,12 +1,12 @@
-// Update widgets for the Home page.
+// Single footer block for everything update-related. Always mounted at
+// the bottom of Home. When an update is available it expands inline to
+// show notes / download progress / install button; the rest of the time
+// it's just "Bitrove vX.X.X · status · [Check for updates]".
 //
-//   * <UpdateAvailableCard /> — prominent card shown only when an update is
-//     ready to download / install. Stays mounted as the phase progresses
-//     (available → downloading → ready).
-//
-//   * <AboutBitrove /> — small footer block that's always visible. Shows the
-//     current version + a "Check for updates" button so users can ask the
-//     question themselves at any time.
+// Earlier this was two separate sections — one card up top, the check
+// button down bottom — which surprised people who saw the update banner
+// at the top and then scrolled down to a second "Check for updates"
+// section that looked unrelated.
 
 import { useState } from "react";
 import { useUpdater } from "../lib/useUpdater.ts";
@@ -67,122 +67,8 @@ function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;");
 }
 
-export function UpdateAvailableCard() {
-  const { state, download, install } = useUpdater();
-
-  if (
-    state.phase === "idle" ||
-    state.phase === "checking" ||
-    state.phase === "up-to-date" ||
-    state.phase === "error"
-  ) {
-    return null;
-  }
-
-  const v = state.phase === "available" || state.phase === "downloading" || state.phase === "ready"
-    ? state.info.version
-    : "";
-
-  return (
-    <section className="mb-8">
-      <h2 className="text-sm font-semibold text-stone-900 uppercase tracking-wider mb-3">
-        Update
-      </h2>
-      <div className="bg-white rounded-xl border border-stone-200 p-5">
-        <div className="flex items-start gap-3 mb-4">
-          <div className="text-2xl shrink-0">✨</div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="font-semibold text-stone-900">Bitrove {v} is available</div>
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                {state.phase === "downloading"
-                  ? "Downloading"
-                  : state.phase === "ready"
-                    ? "Ready"
-                    : "New"}
-              </span>
-            </div>
-            {state.phase === "available" && state.info.releaseDate && (
-              <div className="text-xs text-stone-500 mt-1">
-                Released {new Date(state.info.releaseDate).toLocaleDateString()}
-              </div>
-            )}
-            {state.phase === "ready" && !state.canAutoInstall && (
-              <div className="text-xs text-stone-500 mt-1">
-                Drag the new app into <code className="bg-stone-100 px-1 py-0.5 rounded">/Applications</code>{" "}
-                to update.
-              </div>
-            )}
-          </div>
-          <div className="shrink-0">
-            {state.phase === "available" && (
-              <button
-                onClick={download}
-                className="px-3 py-1.5 rounded-md text-sm font-medium bg-stone-900 text-white border border-stone-900 hover:bg-stone-700"
-              >
-                Download update
-              </button>
-            )}
-            {state.phase === "ready" && (
-              <button
-                onClick={install}
-                className="px-3 py-1.5 rounded-md text-sm font-medium bg-stone-900 text-white border border-stone-900 hover:bg-stone-700"
-              >
-                {state.canAutoInstall ? "Restart and install" : "Open installer"}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {state.phase === "downloading" && (
-          <>
-            <div className="flex items-center justify-between text-xs text-stone-500 mb-1 tabular-nums">
-              <span>
-                {bytes(state.transferred)} / {bytes(state.total)} ·{" "}
-                {speed(state.bytesPerSecond)}
-              </span>
-              <span>{Math.round(state.percent || 0)}%</span>
-            </div>
-            <div className="h-1.5 bg-stone-100 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-stone-900 transition-all"
-                style={{ width: `${Math.round(state.percent || 0)}%` }}
-              />
-            </div>
-          </>
-        )}
-
-        {state.phase === "available" && state.info.releaseNotes && (
-          <div className="mt-3 pt-3 border-t border-stone-100">
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="text-[10px] uppercase tracking-wider text-stone-500">
-                What's new
-              </div>
-              <a
-                href="https://github.com/Liko209/bitrove/releases"
-                target="_blank"
-                rel="noreferrer"
-                className="text-[10px] text-stone-500 hover:text-stone-900 underline"
-              >
-                Full notes
-              </a>
-            </div>
-            <div
-              className="text-xs text-stone-700 release-notes line-clamp-6"
-              dangerouslySetInnerHTML={{
-                __html: sanitizeReleaseNotes(state.info.releaseNotes),
-              }}
-            />
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
-export function AboutBitrove() {
-  const { state, check } = useUpdater();
+export function UpdateFooter() {
+  const { state, check, download, install } = useUpdater();
   const [checking, setChecking] = useState(false);
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
 
@@ -192,21 +78,26 @@ export function AboutBitrove() {
       await check();
       setLastCheckedAt(Date.now());
     } finally {
-      // Give the UI a moment to reflect the new phase before resetting the spinner.
       setTimeout(() => setChecking(false), 600);
     }
   };
 
+  const hasUpdate =
+    state.phase === "available" ||
+    state.phase === "downloading" ||
+    state.phase === "ready";
+  const newVersion = hasUpdate ? state.info.version : "";
+
   let status = "";
-  if (state.phase === "checking" || checking) status = "Checking…";
+  if (state.phase === "checking" || checking) status = "Checking for updates…";
   else if (state.phase === "up-to-date")
     status = `You're on the latest version (checked ${
       lastCheckedAt ? "moments ago" : new Date(state.checkedAt).toLocaleTimeString()
     })`;
   else if (state.phase === "available")
-    status = `Update to ${state.info.version} available — see the panel above.`;
-  else if (state.phase === "downloading") status = `Downloading ${state.info.version}…`;
-  else if (state.phase === "ready") status = `${state.info.version} downloaded — ready to install.`;
+    status = `Update available · v${newVersion}`;
+  else if (state.phase === "downloading") status = `Downloading v${newVersion}…`;
+  else if (state.phase === "ready") status = `v${newVersion} downloaded — ready to install`;
   else if (state.phase === "error") status = state.message;
 
   return (
@@ -216,14 +107,83 @@ export function AboutBitrove() {
           <div className="text-sm font-medium text-stone-900">Bitrove v{__APP_VERSION__}</div>
           <div className="text-xs text-stone-500 mt-0.5 truncate">{status || "—"}</div>
         </div>
-        <button
-          onClick={runCheck}
-          disabled={checking || state.phase === "checking" || state.phase === "downloading"}
-          className="shrink-0 text-sm px-3.5 py-1.5 rounded-md font-medium bg-white text-stone-700 border border-stone-300 hover:bg-stone-50 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {checking || state.phase === "checking" ? "Checking…" : "Check for updates"}
-        </button>
+        <div className="shrink-0 flex items-center gap-2">
+          {state.phase === "available" && (
+            <button
+              onClick={download}
+              className="text-sm px-3.5 py-1.5 rounded-md font-medium bg-stone-900 text-white border border-stone-900 hover:bg-stone-700"
+            >
+              Download update
+            </button>
+          )}
+          {state.phase === "ready" && (
+            <button
+              onClick={install}
+              className="text-sm px-3.5 py-1.5 rounded-md font-medium bg-stone-900 text-white border border-stone-900 hover:bg-stone-700"
+            >
+              {state.canAutoInstall ? "Restart and install" : "Open installer"}
+            </button>
+          )}
+          {!hasUpdate && (
+            <button
+              onClick={runCheck}
+              disabled={checking || state.phase === "checking"}
+              className="text-sm px-3.5 py-1.5 rounded-md font-medium bg-white text-stone-700 border border-stone-300 hover:bg-stone-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {checking || state.phase === "checking" ? "Checking…" : "Check for updates"}
+            </button>
+          )}
+        </div>
       </div>
+
+      {state.phase === "downloading" && (
+        <div className="mt-3">
+          <div className="flex items-center justify-between text-xs text-stone-500 mb-1 tabular-nums">
+            <span>
+              {bytes(state.transferred)} / {bytes(state.total)} ·{" "}
+              {speed(state.bytesPerSecond)}
+            </span>
+            <span>{Math.round(state.percent || 0)}%</span>
+          </div>
+          <div className="h-1.5 bg-stone-100 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-stone-900 transition-all"
+              style={{ width: `${Math.round(state.percent || 0)}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {state.phase === "ready" && !state.canAutoInstall && (
+        <div className="mt-2 text-xs text-stone-500">
+          Drag the new app into{" "}
+          <code className="bg-stone-100 px-1 py-0.5 rounded">/Applications</code> to update.
+        </div>
+      )}
+
+      {state.phase === "available" && state.info.releaseNotes && (
+        <div className="mt-4 pt-4 border-t border-stone-100">
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="text-[10px] uppercase tracking-wider text-stone-500">
+              What's new
+            </div>
+            <a
+              href="https://github.com/Liko209/bitrove/releases"
+              target="_blank"
+              rel="noreferrer"
+              className="text-[10px] text-stone-500 hover:text-stone-900 underline"
+            >
+              Full notes
+            </a>
+          </div>
+          <div
+            className="text-xs text-stone-700 release-notes line-clamp-6"
+            dangerouslySetInnerHTML={{
+              __html: sanitizeReleaseNotes(state.info.releaseNotes),
+            }}
+          />
+        </div>
+      )}
     </section>
   );
 }
