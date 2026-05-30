@@ -185,7 +185,7 @@ export default function Home() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <h1 className="text-2xl font-semibold text-stone-900 mb-1">Welcome back</h1>
+      <h1 className="font-serif-display text-4xl text-stone-900 mb-1">Welcome back</h1>
       <p className="text-stone-600 text-sm mb-8">
         Your private knowledge layer is{" "}
         {servicesOk ? (

@@ -7,6 +7,7 @@ import Jobs from "./pages/Jobs.tsx";
 import Agents from "./pages/Agents.tsx";
 import Dashboard from "./pages/Dashboard.tsx";
 import Settings from "./pages/Settings.tsx";
+import { SettingsGearIcon } from "./components/icons.tsx";
 import { useJobs } from "./lib/useJobs.ts";
 import { GlobalJobIndicator } from "./components/GlobalJobIndicator.tsx";
 
@@ -51,10 +52,14 @@ export default function App() {
     <div className="min-h-full flex flex-col">
       <div className="sticky top-0 z-10">
         <header className="border-b border-stone-200 bg-white app-drag">
-          <div className="max-w-7xl mx-auto pl-24 pr-6 py-3 flex items-center gap-6">
+          {/* macOS traffic lights sit at top-left of the window. We pad to
+              ~80px on the left to clear them, and lock header height to
+              52px so the "Bitrove" wordmark + nav items vertically align
+              with the lights' midline. */}
+          <div className="max-w-7xl mx-auto pl-[88px] pr-6 h-[52px] flex items-center gap-6">
             <Link
               to="/"
-              className="font-semibold text-stone-900 tracking-tight hover:text-stone-700 transition-colors app-no-drag"
+              className="text-[15px] font-semibold text-stone-900 tracking-tight hover:text-stone-700 transition-colors app-no-drag"
             >
               Bitrove
             </Link>
@@ -67,7 +72,7 @@ export default function App() {
                 />
               ))}
             </nav>
-            <div className="ml-auto flex items-center gap-3 app-no-drag">
+            <div className="ml-auto flex items-center gap-4 app-no-drag">
               <GlobalJobIndicator />
               <Link
                 to="/settings"
@@ -75,12 +80,9 @@ export default function App() {
                 title="Settings"
                 aria-label="Settings"
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                </svg>
+                <SettingsGearIcon size={18} />
               </Link>
-              <div className="text-xs text-stone-500">v{__APP_VERSION__}</div>
+              <div className="text-[11px] text-stone-400 tabular-nums font-mono">v{__APP_VERSION__}</div>
             </div>
           </div>
         </header>

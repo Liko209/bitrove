@@ -21,7 +21,7 @@ function CopyButton({ text }: { text: string }) {
       }}
       className="text-xs px-2.5 py-1 rounded-md bg-white border border-stone-300 hover:bg-stone-50 text-stone-700 font-medium"
     >
-      {copied ? "✓ Copied" : "Copy"}
+      {copied ? "Copied" : "Copy"}
     </button>
   );
 }
@@ -71,7 +71,7 @@ export default function Agents() {
 
   return (
     <div className="max-w-3xl mx-auto">
-      <h1 className="text-2xl font-semibold text-stone-900 mb-2">AI tools</h1>
+      <h1 className="font-serif-display text-4xl text-stone-900 mb-2">AI tools</h1>
       <p className="text-stone-600 text-sm mb-8">
         Let your favourite AI agents read and search your library. Bitrove never sends
         the documents themselves — it just lets the agent ask "what does Liko have
@@ -87,20 +87,17 @@ export default function Agents() {
       {/* ── Local MCP server status ──────────────────────────────── */}
       <section className="mb-8">
         <div className="bg-white rounded-xl border border-stone-200 p-5">
-          <div className="flex items-start gap-3 mb-4">
-            <div className="text-2xl shrink-0">🛰️</div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="font-semibold text-stone-900">Local MCP server</div>
-                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  Ready
-                </span>
-              </div>
-              <div className="text-sm text-stone-600 mt-1">
-                AI agents launch this server on demand and ask it to search your library.
-                Nothing runs unless an agent connects.
-              </div>
+          <div className="mb-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="font-semibold text-stone-900">Local MCP server</div>
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full label-eyebrow bg-emerald-50 text-emerald-800">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                Ready
+              </span>
+            </div>
+            <div className="text-sm text-stone-600 mt-1">
+              AI agents launch this server on demand and ask it to search your library.
+              Nothing runs unless an agent connects.
             </div>
           </div>
 
@@ -134,7 +131,7 @@ export default function Agents() {
       {/* ── Claude Code ──────────────────────────────────────────── */}
       <section className="mb-6">
         <AppCard
-          icon="🧠"
+          icon="CC"
           name="Claude Code"
           description="Anthropic's terminal-based assistant. Lets Claude search your library while you work."
           state={
@@ -181,7 +178,7 @@ export default function Agents() {
       {claudeDesktop?.exists && (
         <section className="mb-6">
           <AppCard
-            icon="💻"
+            icon="CD"
             name="Claude Desktop"
             description="The Claude app for Mac. Same connection, different config file."
             state={claudeDesktop.hasTroveEntry ? "connected" : "ready-to-connect"}
@@ -196,7 +193,7 @@ export default function Agents() {
       {/* ── Other ─────────────────────────────────────────────────── */}
       <section className="mb-6">
         <AppCard
-          icon="🛠"
+          icon={<span className="text-stone-500">+</span>}
           name="Other AI tools"
           description="Any tool that speaks MCP (Codex, Cursor agents, custom apps…) can also talk to Bitrove. Show the technical setup if you need it."
           state="info"
@@ -279,7 +276,7 @@ function AppCard({
   onAction,
   footer,
 }: {
-  icon: string;
+  icon: React.ReactNode;
   name: string;
   description: string;
   state: AppState;
@@ -312,7 +309,9 @@ function AppCard({
   return (
     <div className="bg-white rounded-xl border border-stone-200 p-5">
       <div className="flex items-start gap-4">
-        <div className="text-3xl shrink-0">{icon}</div>
+        <div className="shrink-0 w-10 h-10 rounded-lg bg-stone-100 text-stone-700 flex items-center justify-center font-mono text-sm font-semibold tracking-tight">
+          {icon}
+        </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <div className="font-semibold text-stone-900">{name}</div>

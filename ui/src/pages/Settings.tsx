@@ -80,7 +80,7 @@ export default function Settings() {
   if (err && !data) {
     return (
       <div className="max-w-3xl mx-auto">
-        <h1 className="text-2xl font-semibold text-stone-900 mb-2">Settings</h1>
+        <h1 className="font-serif-display text-4xl text-stone-900 mb-2">Settings</h1>
         <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded text-sm">
           {err}
         </div>
@@ -105,7 +105,7 @@ export default function Settings() {
   return (
     <div className="max-w-3xl mx-auto pb-12">
       <div className="flex items-baseline justify-between mb-2">
-        <h1 className="text-2xl font-semibold text-stone-900">Settings</h1>
+        <h1 className="font-serif-display text-4xl text-stone-900">Settings</h1>
         <button
           onClick={resetToDefaults}
           className="text-xs text-stone-500 hover:text-stone-900 underline"

@@ -24,6 +24,25 @@ body {
   color: #1c1917;
 }
 
+/* Editorial serif for page titles + stat numbers — system "New York" on
+   macOS gives that Notion/Linear hero-heading feel without shipping a
+   web font. Falls back to Georgia / Times on other platforms. */
+.font-serif-display {
+  font-family: "New York", "Newsreader", "Lyon Text", "Instrument Serif", Georgia,
+    "Times New Roman", serif;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+}
+
+/* All-caps micro-labels used by tags / status pills / section eyebrows.
+   Saves repeating the same three utilities everywhere. */
+.label-eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  font-weight: 600;
+}
+
 /* Release notes inside <UpdateAvailableCard /> get a tiny prose stylesheet.
    We feed in sanitized HTML (h2 / ul / li / strong / em / code only), so a
    handful of rules is enough to make it read like a changelog instead of

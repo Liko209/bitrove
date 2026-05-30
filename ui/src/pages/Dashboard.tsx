@@ -52,7 +52,7 @@ export default function Dashboard() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-stone-900 mb-6">Dashboard</h1>
+      <h1 className="font-serif-display text-4xl text-stone-900 mb-6">Dashboard</h1>
 
       {err && (
         <div className="mb-4 p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded text-sm">

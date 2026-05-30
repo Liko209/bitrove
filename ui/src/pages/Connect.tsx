@@ -84,7 +84,7 @@ export default function Connect() {
   return (
     <div>
       <div className="flex items-baseline mb-6">
-        <h1 className="text-2xl font-semibold text-stone-900">Connect agents</h1>
+        <h1 className="font-serif-display text-4xl text-stone-900">Connect agents</h1>
         <span className="ml-3 text-stone-500 text-sm">
           Let AI tools search your knowledge base.
         </span>

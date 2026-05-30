@@ -8,6 +8,7 @@ import { Link } from "react-router-dom";
 import { api } from "../lib/api.ts";
 import { bytes, formatDurationSeconds, shortPath } from "../lib/format.ts";
 import { openSettingsFor, usePermission } from "./PermissionStatus.tsx";
+import { BookIcon, FileIcon } from "./icons.tsx";
 
 type Preview = Awaited<ReturnType<typeof api.sourcePreview>>;
 
@@ -83,12 +84,13 @@ export default function ScanConfirmModal({
       onClick={onCancel}
     >
       <div
-        className="bg-white rounded-2xl border border-stone-200 shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]"
+        className="bg-white rounded-xl border border-stone-200 w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]"
+        style={{ boxShadow: "0 8px 32px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.03)" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-6 pt-5 pb-4 border-b border-stone-100 shrink-0">
-          <h2 className="text-lg font-semibold text-stone-900">Add this folder to your library?</h2>
-          <p className="text-sm text-stone-500 mt-1 truncate font-mono" title={path}>
+          <h2 className="font-serif-display text-[22px] text-stone-900">Add this folder to your library?</h2>
+          <p className="text-xs text-stone-500 mt-1.5 truncate font-mono" title={path}>
             {shortPath(path)}
           </p>
         </div>
@@ -198,7 +200,9 @@ export default function ScanConfirmModal({
                         key={f.path}
                         className="flex items-center gap-2 text-xs text-stone-700"
                       >
-                        <span className="shrink-0">{f.kind === "text" ? "📄" : "📚"}</span>
+                        <span className="shrink-0 text-stone-400">
+                          {f.kind === "text" ? <FileIcon size={14} /> : <BookIcon size={14} />}
+                        </span>
                         <span className="truncate font-mono" title={f.path}>
                           {f.name}
                         </span>

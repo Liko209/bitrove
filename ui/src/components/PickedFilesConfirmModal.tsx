@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api.ts";
 import { bytes } from "../lib/format.ts";
+import { BookIcon, FileIcon, PaperclipIcon } from "./icons.tsx";
 
 type PickedFile = {
   path: string;
@@ -22,7 +23,7 @@ type PickedFile = {
 
 // Subset of SUPPORTED_TYPES, hard-coded to avoid an extra round-trip just
 // to render an icon. Keep loosely in sync with src/settings.ts. Anything
-// not matched falls through to a neutral text-icon.
+// not matched falls through to a neutral paperclip.
 const TEXT_EXTS = new Set([
   ".pdf", ".docx", ".doc", ".rtf", ".odt",
   ".md", ".mdx", ".markdown", ".txt", ".rst", ".adoc", ".org",
@@ -32,10 +33,10 @@ const TEXT_EXTS = new Set([
 ]);
 const BOOK_EXTS = new Set([".epub", ".mobi", ".azw3"]);
 
-function iconFor(ext: string): string {
-  if (BOOK_EXTS.has(ext)) return "📚";
-  if (TEXT_EXTS.has(ext)) return "📄";
-  return "📎"; // generic — covers code-like + everything unknown
+function iconFor(ext: string, size = 14, className = "") {
+  if (BOOK_EXTS.has(ext)) return <BookIcon size={size} className={className} />;
+  if (TEXT_EXTS.has(ext)) return <FileIcon size={size} className={className} />;
+  return <PaperclipIcon size={size} className={className} />;
 }
 
 export default function PickedFilesConfirmModal({
@@ -77,14 +78,15 @@ export default function PickedFilesConfirmModal({
       onClick={onCancel}
     >
       <div
-        className="bg-white rounded-2xl border border-stone-200 shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]"
+        className="bg-white rounded-xl border border-stone-200 w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]"
+        style={{ boxShadow: "0 8px 32px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.03)" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-6 pt-5 pb-4 border-b border-stone-100 shrink-0">
-          <h2 className="text-lg font-semibold text-stone-900">
+          <h2 className="font-serif-display text-[22px] text-stone-900">
             Add {files.length} file{files.length === 1 ? "" : "s"} to your library?
           </h2>
-          <p className="text-sm text-stone-500 mt-1">
+          <p className="text-xs text-stone-500 mt-1.5">
             These will be indexed individually. {bytes(totalBytes)} total.
           </p>
         </div>
@@ -127,7 +129,7 @@ export default function PickedFilesConfirmModal({
                   key={f.path}
                   className="flex items-center gap-2 text-xs text-stone-700 py-1"
                 >
-                  <span className="shrink-0">{iconFor(f.ext)}</span>
+                  <span className="shrink-0 text-stone-400">{iconFor(f.ext, 14)}</span>
                   <span
                     className={
                       "truncate font-mono " + (isFlagged ? "text-amber-900" : "")
@@ -137,7 +139,7 @@ export default function PickedFilesConfirmModal({
                     {f.name}
                   </span>
                   {isFlagged && (
-                    <span className="shrink-0 px-1.5 py-0.5 text-[10px] rounded bg-amber-100 text-amber-800 border border-amber-200">
+                    <span className="shrink-0 px-1.5 py-0.5 label-eyebrow rounded bg-amber-50 text-amber-800 border border-amber-200">
                       off by default
                     </span>
                   )}

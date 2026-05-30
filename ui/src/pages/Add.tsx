@@ -13,12 +13,30 @@ import { shortPath } from "../lib/format.ts";
 import ScanConfirmModal from "../components/ScanConfirmModal.tsx";
 import PickedFilesConfirmModal from "../components/PickedFilesConfirmModal.tsx";
 import {
+  CloudIcon,
+  DesktopIcon,
+  DownloadIcon,
+  FileIcon,
+  FolderIcon,
+  FolderOpenIcon,
+} from "../components/icons.tsx";
+import {
   PermissionPill,
   openSettingsFor,
   usePermission,
 } from "../components/PermissionStatus.tsx";
 
-type Recommended = { label: string; path: string; icon: string; description: string };
+type RecommendedIcon = "cloud" | "folder" | "desktop" | "download";
+type Recommended = { label: string; path: string; icon: RecommendedIcon; description: string };
+
+function recommendedIconFor(kind: RecommendedIcon, size = 22, className = "") {
+  switch (kind) {
+    case "cloud": return <CloudIcon size={size} className={className} />;
+    case "folder": return <FolderOpenIcon size={size} className={className} />;
+    case "desktop": return <DesktopIcon size={size} className={className} />;
+    case "download": return <DownloadIcon size={size} className={className} />;
+  }
+}
 
 type PickedFile = { path: string; name: string; ext: string; size: number };
 
@@ -35,25 +53,25 @@ declare global {
 const FALLBACK_RECOMMENDED: Recommended[] = [
   {
     label: "iCloud Drive",
-    icon: "☁",
+    icon: "cloud",
     path: "~/Library/Mobile Documents/com~apple~CloudDocs",
     description: "Your iCloud Drive — documents that sync across all your Apple devices.",
   },
   {
     label: "Documents folder",
-    icon: "📂",
+    icon: "folder",
     path: "~/Documents",
     description: "Your local Documents folder.",
   },
   {
     label: "Desktop",
-    icon: "🖥",
+    icon: "desktop",
     path: "~/Desktop",
     description: "Anything sitting on your desktop.",
   },
   {
     label: "Downloads",
-    icon: "⬇",
+    icon: "download",
     path: "~/Downloads",
     description: "PDFs and files you've downloaded.",
   },
@@ -119,7 +137,7 @@ export default function Add() {
             out.push({
               label: r.label,
               path: r.path, // absolute path from main process
-              icon: tpl?.icon ?? "📁",
+              icon: tpl?.icon ?? "folder",
               description: tpl?.description ?? r.path,
             });
           }
@@ -189,12 +207,12 @@ export default function Add() {
 
   return (
     <div className="max-w-3xl mx-auto">
-      <h1 className="text-2xl font-semibold text-stone-900 mb-2">Add to your library</h1>
-      <p className="text-stone-600 text-sm">
+      <h1 className="font-serif-display text-4xl text-stone-900 mb-3">Add to your library</h1>
+      <p className="text-stone-600 text-[15px] leading-relaxed max-w-2xl">
         Pick a place on your Mac. Bitrove will read the documents inside, index them locally,
         and make them searchable to your AI agents — nothing leaves this Mac.
       </p>
-      <p className="text-stone-500 text-xs mb-8 mt-2">
+      <p className="text-stone-500 text-xs mb-10 mt-3">
         Code source files and folders like <code className="font-mono">node_modules</code>{" "}
         are skipped by default.{" "}
         <Link to="/settings" className="underline hover:text-stone-900">
@@ -233,33 +251,33 @@ export default function Add() {
           <button
             onClick={pickAndScan}
             disabled={!bridge}
-            className="w-full p-4 rounded-xl border border-dashed border-stone-300 hover:border-stone-500 hover:bg-stone-50 transition text-left disabled:opacity-50"
+            className="w-full p-5 rounded-xl border border-dashed border-stone-300 hover:border-stone-500 hover:bg-stone-50 transition text-left disabled:opacity-50"
           >
-            <div className="flex items-center gap-3">
-              <div className="text-2xl shrink-0">📁</div>
+            <div className="flex items-center gap-4">
+              <FolderIcon size={22} className="shrink-0 text-stone-500" />
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-stone-900">Choose a folder…</div>
                 <div className="text-xs text-stone-500 mt-0.5">
                   Pick any folder on your Mac. We'll preview what's inside and respect your default filters.
                 </div>
               </div>
-              <div className="text-stone-400 text-sm shrink-0">Browse</div>
+              <div className="text-stone-400 text-xs shrink-0">Browse</div>
             </div>
           </button>
           <button
             onClick={pickAndAddFiles}
             disabled={!bridge?.pickFiles}
-            className="w-full p-4 rounded-xl border border-dashed border-stone-300 hover:border-stone-500 hover:bg-stone-50 transition text-left disabled:opacity-50"
+            className="w-full p-5 rounded-xl border border-dashed border-stone-300 hover:border-stone-500 hover:bg-stone-50 transition text-left disabled:opacity-50"
           >
-            <div className="flex items-center gap-3">
-              <div className="text-2xl shrink-0">📄</div>
+            <div className="flex items-center gap-4">
+              <FileIcon size={22} className="shrink-0 text-stone-500" />
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-stone-900">Pick specific files…</div>
                 <div className="text-xs text-stone-500 mt-0.5">
                   Hand-pick one or more files. Default filters don't apply — anything you select is added.
                 </div>
               </div>
-              <div className="text-stone-400 text-sm shrink-0">Choose</div>
+              <div className="text-stone-400 text-xs shrink-0">Choose</div>
             </div>
           </button>
         </div>
@@ -350,14 +368,14 @@ function RecommendedCard({
       }
     >
       <div className="flex items-center gap-4">
-        <div className="text-2xl shrink-0">{rec.icon}</div>
+        <span className="shrink-0 text-stone-500">{recommendedIconFor(rec.icon, 24)}</span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <div className="font-medium text-stone-900">{rec.label}</div>
             {already && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full label-eyebrow bg-emerald-50 text-emerald-800">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                Already added
+                Added
               </span>
             )}
             <PermissionPill perm={perm} />

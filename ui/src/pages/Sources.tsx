@@ -139,7 +139,7 @@ export default function Sources() {
         <Link to="/" className="text-stone-500 hover:text-stone-900 mr-3 text-xl">
           ←
         </Link>
-        <h1 className="text-2xl font-semibold text-stone-900">
+        <h1 className="font-serif-display text-4xl text-stone-900">
           {category ? category : "All files"}
         </h1>
         {data && (
