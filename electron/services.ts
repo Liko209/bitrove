@@ -6,10 +6,39 @@
 // All bound to 127.0.0.1. Health-checked on startup. Killed on app quit.
 
 import { spawn, ChildProcess } from "node:child_process";
-import { join } from "node:path";
-import { existsSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { existsSync, mkdirSync, appendFileSync } from "node:fs";
 import { app } from "electron";
-import { adminEntry, llamaServerBinary, modelsDir, dbPath, summary } from "./paths.ts";
+import {
+  adminEntry,
+  llamaServerBinary,
+  modelsDir,
+  dbPath,
+  uiDistDir,
+  summary,
+} from "./paths.ts";
+
+// File-based logger so we can see what happens in packaged mode where
+// console.log is silently dropped.
+let LOG_FILE: string | null = null;
+function logPath(): string {
+  if (LOG_FILE) return LOG_FILE;
+  try {
+    const dir = join(app.getPath("userData"), "logs");
+    mkdirSync(dir, { recursive: true });
+    LOG_FILE = join(dir, "services.log");
+  } catch {
+    LOG_FILE = "/tmp/trove-services.log";
+  }
+  return LOG_FILE;
+}
+function svcLog(name: string, msg: string) {
+  const line = `[${new Date().toISOString()}] [${name}] ${msg}\n`;
+  try {
+    appendFileSync(logPath(), line);
+  } catch {}
+  if (!app.isPackaged) console.log(line.trimEnd());
+}
 
 export type ServiceName = "admin" | "embed" | "rerank";
 
@@ -98,6 +127,10 @@ export async function startAdmin(): Promise<void> {
     EMBED_URL: `http://127.0.0.1:${PORTS.embed}`,
     RERANK_URL: `http://127.0.0.1:${PORTS.rerank}`,
     KB_DB: dbPath(),
+    // admin's __dirname / "../ui/dist" resolution doesn't work in packaged
+    // mode because Resources/app/admin/index.mjs is far from the UI bundle
+    // (Resources/app/ui-dist/). Tell it explicitly.
+    TROVE_UI_DIST: uiDistDir(),
   };
 
   // In packaged mode the admin entry runs inside Electron's bundled Node;
@@ -115,13 +148,25 @@ export async function startAdmin(): Promise<void> {
       : unpackedModules;
   }
 
+  svcLog("admin", `spawn: ${command} ${args.join(" ")} (cwd=${cwd})`);
+  svcLog("admin", `env.PORT=${env.PORT} ELECTRON_RUN_AS_NODE=${env.ELECTRON_RUN_AS_NODE ?? "(unset)"}`);
+  svcLog("admin", `env.NODE_PATH=${env.NODE_PATH ?? "(unset)"}`);
+
   const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
   PROCS.admin = child;
   STATE.admin.pid = child.pid;
+  svcLog("admin", `child pid=${child.pid}`);
 
-  child.stdout?.on("data", (b) => console.log(`[admin] ${b.toString().trimEnd()}`));
-  child.stderr?.on("data", (b) => console.error(`[admin] ${b.toString().trimEnd()}`));
-  child.on("exit", (code) => {
+  child.stdout?.on("data", (b) => svcLog("admin", `stdout: ${b.toString().trimEnd()}`));
+  child.stderr?.on("data", (b) => svcLog("admin", `stderr: ${b.toString().trimEnd()}`));
+  child.on("error", (e) => {
+    svcLog("admin", `spawn ERROR: ${e.message}`);
+    STATE.admin.status = "crashed";
+    STATE.admin.detail = e.message;
+    notify();
+  });
+  child.on("exit", (code, signal) => {
+    svcLog("admin", `exit code=${code} signal=${signal}`);
     STATE.admin.status = code === 0 ? "stopped" : "crashed";
     STATE.admin.detail = `exit ${code}`;
     notify();
@@ -165,19 +210,24 @@ export async function startLlama(name: "embed" | "rerank"): Promise<void> {
     ? ["--embedding", "--pooling", "cls"]
     : ["--reranking"];
 
+  svcLog(name, `spawn ${binary} (model=${modelFile})`);
   const child = spawn(binary, [...commonArgs, ...specificArgs], {
     stdio: ["ignore", "pipe", "pipe"],
   });
   PROCS[name] = child;
   STATE[name].pid = child.pid;
+  svcLog(name, `child pid=${child.pid}`);
 
-  child.stdout?.on("data", (b) =>
-    console.log(`[${name}] ${b.toString().trimEnd()}`),
-  );
-  child.stderr?.on("data", (b) =>
-    console.error(`[${name}] ${b.toString().trimEnd()}`),
-  );
-  child.on("exit", (code) => {
+  child.stdout?.on("data", (b) => svcLog(name, `stdout: ${b.toString().trimEnd()}`));
+  child.stderr?.on("data", (b) => svcLog(name, `stderr: ${b.toString().trimEnd()}`));
+  child.on("error", (e) => {
+    svcLog(name, `spawn ERROR: ${e.message}`);
+    STATE[name].status = "crashed";
+    STATE[name].detail = e.message;
+    notify();
+  });
+  child.on("exit", (code, signal) => {
+    svcLog(name, `exit code=${code} signal=${signal}`);
     STATE[name].status = code === 0 ? "stopped" : "crashed";
     STATE[name].detail = `exit ${code}`;
     notify();

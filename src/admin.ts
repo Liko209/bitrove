@@ -45,7 +45,10 @@ const EMBED_URL = process.env.EMBED_URL ?? "http://127.0.0.1:8765";
 const RERANK_URL = process.env.RERANK_URL ?? "http://127.0.0.1:8766";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const UI_DIST = resolve(__dirname, "../ui/dist");
+// In packaged mode the bundled admin sits at Resources/app/admin/index.mjs
+// while the UI is at Resources/app/ui-dist, so the relative "../ui/dist"
+// path doesn't apply. services.ts passes the absolute path in TROVE_UI_DIST.
+const UI_DIST = process.env.TROVE_UI_DIST ?? resolve(__dirname, "../ui/dist");
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
