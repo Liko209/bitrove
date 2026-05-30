@@ -23,12 +23,21 @@ export default function ScanConfirmModal({
   //   one scan to include).
   // Second arg: whether to keep this folder under a file-watcher after
   //   the initial scan. Default true; user can opt out via the toggle.
-  onConfirm: (extraIncludeExts: string[], watchAfterScan: boolean) => void;
+  // Third arg: absolute path prefixes to skip during this scan (built
+  //   from the top-level subdir checkboxes the user unchecked).
+  onConfirm: (
+    extraIncludeExts: string[],
+    watchAfterScan: boolean,
+    excludePaths: string[],
+  ) => void;
 }) {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [err, setErr] = useState<string | null>(null);
   // Extensions the user has clicked back ON for this scan.
   const [overrides, setOverrides] = useState<Set<string>>(new Set());
+  // Top-level subdir names the user has clicked OFF (so they're dropped
+  // from this scan). The list comes from preview.topFolders.
+  const [excludedSubdirs, setExcludedSubdirs] = useState<Set<string>>(new Set());
   const [watchAfter, setWatchAfter] = useState(true);
   const { perm, recheck } = usePermission(path);
 
@@ -36,6 +45,7 @@ export default function ScanConfirmModal({
     setPreview(null);
     setErr(null);
     setOverrides(new Set());
+    setExcludedSubdirs(new Set());
     // Only attempt the preview when we know we have access. If the user
     // grants permission and clicks Re-check, the new "granted" state will
     // re-fire this effect.
@@ -54,17 +64,34 @@ export default function ScanConfirmModal({
     [preview?.excludedExts],
   );
 
-  // Default-excluded count (before any user override) and the count the
-  // user has *kept* excluded (i.e. didn't toggle back on).
-  const { excludedFromDefault, effectiveIndexable } = useMemo(() => {
-    if (!preview) return { excludedFromDefault: 0, effectiveIndexable: 0 };
+  // Compute three independent reductions from the raw preview total:
+  //   - excludedFromDefault: ext patterns the user kept on the
+  //     ingest-settings exclude list (already there from Phase 2).
+  //   - excludedFromSubdirs: top-level subdirs the user unchecked in
+  //     "From these folders". Estimated from preview.topFolders.indexable.
+  // The Will-index figure surfaces the live result of both.
+  const {
+    excludedFromDefault,
+    excludedFromSubdirs,
+    effectiveIndexable,
+  } = useMemo(() => {
+    if (!preview)
+      return { excludedFromDefault: 0, excludedFromSubdirs: 0, effectiveIndexable: 0 };
     const total = preview.text + preview.catalog;
-    let dropped = 0;
+    let extDropped = 0;
     for (const e of preview.excludedByExt) {
-      if (!overrides.has(e.ext)) dropped += e.indexable;
+      if (!overrides.has(e.ext)) extDropped += e.indexable;
     }
-    return { excludedFromDefault: dropped, effectiveIndexable: Math.max(0, total - dropped) };
-  }, [preview, overrides]);
+    let subdirDropped = 0;
+    for (const f of preview.topFolders) {
+      if (excludedSubdirs.has(f.name)) subdirDropped += f.indexable;
+    }
+    return {
+      excludedFromDefault: extDropped,
+      excludedFromSubdirs: subdirDropped,
+      effectiveIndexable: Math.max(0, total - extDropped - subdirDropped),
+    };
+  }, [preview, overrides, excludedSubdirs]);
 
   const totalIndexable = effectiveIndexable;
   const ratio = preview && preview.totalScanned > 0
@@ -78,6 +105,28 @@ export default function ScanConfirmModal({
       else next.add(ext);
       return next;
     });
+  }
+
+  function toggleSubdir(name: string) {
+    setExcludedSubdirs((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }
+
+  // When confirming, convert excluded subdir names into walker exclude
+  // patterns. We use absolute path prefixes (root + "/" + name + "/")
+  // so the walker substring match only kills files actually under that
+  // sub-tree, not anything else that happens to share the name. The
+  // "(root)" pseudo-bucket is ignored — excluding root-level files
+  // would require ext filtering, which is a separate control.
+  function subdirsToExcludePaths(): string[] {
+    const norm = path.endsWith("/") ? path.slice(0, -1) : path;
+    return [...excludedSubdirs]
+      .filter((n) => n !== "(root)")
+      .map((n) => `${norm}/${n}/`);
   }
 
   return (
@@ -162,6 +211,18 @@ export default function ScanConfirmModal({
                     </Link>
                   </Bullet>
                 )}
+                {excludedFromSubdirs > 0 && (
+                  <Bullet>
+                    Skipping{" "}
+                    <strong>{excludedFromSubdirs.toLocaleString()}</strong>{" "}
+                    files from{" "}
+                    {[...excludedSubdirs]
+                      .filter((n) => n !== "(root)")
+                      .slice(0, 3)
+                      .join(", ")}
+                    {excludedSubdirs.size > 3 ? " …" : ""}.
+                  </Bullet>
+                )}
                 <Bullet>
                   Estimated time:{" "}
                   <strong>{formatDurationSeconds(preview.estimatedSeconds)}</strong>
@@ -180,9 +241,15 @@ export default function ScanConfirmModal({
                     <div className="text-xs uppercase tracking-wider text-stone-500">
                       From these folders
                     </div>
-                    <div className="text-[10px] text-stone-400">top {preview.topFolders.length}</div>
+                    <div className="text-[10px] text-stone-400">
+                      uncheck to skip · top {preview.topFolders.length}
+                    </div>
                   </div>
-                  <FolderBreakdown folders={preview.topFolders} />
+                  <FolderBreakdown
+                    folders={preview.topFolders}
+                    excluded={excludedSubdirs}
+                    onToggle={toggleSubdir}
+                  />
                 </div>
               )}
 
@@ -298,7 +365,7 @@ export default function ScanConfirmModal({
               Cancel
             </button>
             <button
-              onClick={() => onConfirm([...overrides], watchAfter)}
+              onClick={() => onConfirm([...overrides], watchAfter, subdirsToExcludePaths())}
               disabled={!preview || totalIndexable === 0 || perm.state !== "granted"}
               className="px-4 py-1.5 rounded-md text-sm font-medium bg-stone-900 text-white hover:bg-stone-700 disabled:opacity-40 disabled:cursor-not-allowed"
             >
@@ -313,28 +380,67 @@ export default function ScanConfirmModal({
 
 function FolderBreakdown({
   folders,
+  excluded,
+  onToggle,
 }: {
   folders: { name: string; indexable: number; skipped: number; bytes: number }[];
+  excluded: Set<string>;
+  onToggle: (name: string) => void;
 }) {
   const max = Math.max(...folders.map((f) => f.indexable), 1);
   return (
     <ul className="space-y-1.5">
       {folders.map((f) => {
+        const isExcluded = excluded.has(f.name);
+        // "(root)" can't be excluded via a path-prefix walker rule, so
+        // its checkbox is omitted; users who want to drop root-level
+        // files do that via the file-type filters.
+        const togglable = f.name !== "(root)";
         const ratio = Math.round((f.indexable / max) * 100);
+        const checked = !isExcluded;
         return (
           <li key={f.name} className="text-xs">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="font-medium text-stone-800 truncate" title={f.name}>
+            <label
+              className={
+                "flex items-baseline gap-2 cursor-pointer " +
+                (!togglable ? "cursor-default" : "")
+              }
+            >
+              {togglable ? (
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => onToggle(f.name)}
+                  className="shrink-0 accent-stone-900"
+                />
+              ) : (
+                <span className="shrink-0 w-3 h-3" />
+              )}
+              <span
+                className={
+                  "font-medium truncate flex-1 " +
+                  (isExcluded ? "text-stone-400 line-through" : "text-stone-800")
+                }
+                title={f.name}
+              >
                 {f.name === "(root)" ? <em className="text-stone-500">files at root</em> : f.name}
               </span>
-              <span className="text-stone-500 tabular-nums shrink-0">
+              <span
+                className={
+                  "tabular-nums shrink-0 " +
+                  (isExcluded ? "text-stone-300 line-through" : "text-stone-500")
+                }
+              >
                 {f.indexable.toLocaleString()} files
-                <span className="text-stone-400"> · {bytes(f.bytes)}</span>
+                <span className={isExcluded ? "text-stone-300" : "text-stone-400"}> · {bytes(f.bytes)}</span>
               </span>
-            </div>
-            <div className="mt-1 h-1 rounded bg-stone-100 overflow-hidden">
+            </label>
+            <div className="mt-1 ml-5 h-1 rounded bg-stone-100 overflow-hidden">
               <div
-                className="h-full bg-emerald-500/70"
+                className={
+                  "h-full transition-all " +
+                  (isExcluded ? "bg-stone-300" : "bg-emerald-500/70")
+                }
                 style={{ width: `${ratio}%` }}
               />
             </div>

@@ -1,5 +1,4 @@
 import { Link, Route, Routes, useLocation, Navigate } from "react-router-dom";
-import Home from "./pages/Home.tsx";
 import Library from "./pages/Library.tsx";
 import Sources from "./pages/Sources.tsx";
 import Add from "./pages/Add.tsx";
@@ -8,15 +7,17 @@ import Agents from "./pages/Agents.tsx";
 import Dashboard from "./pages/Dashboard.tsx";
 import Settings from "./pages/Settings.tsx";
 import { SettingsGearIcon } from "./components/icons.tsx";
-import { useJobs } from "./lib/useJobs.ts";
 import { GlobalJobIndicator } from "./components/GlobalJobIndicator.tsx";
 
+// Three top-level destinations matching the three core verbs:
+//   See (Library), Add, Connect (Agents).
+// Settings sits behind the ⚙ icon on the right (macOS convention).
+// /jobs, /sources, /dashboard are still routable by URL or contextual
+// links but don't take up nav real estate.
 const NAV = [
-  { to: "/", label: "Home" },
   { to: "/library", label: "Library" },
   { to: "/add", label: "Add" },
-  { to: "/jobs", label: "Activity" },
-  { to: "/agents", label: "AI tools" },
+  { to: "/agents", label: "Agents" },
 ];
 
 function NavLink({ to, label, badge }: { to: string; label: string; badge?: number }) {

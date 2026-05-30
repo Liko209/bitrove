@@ -188,11 +188,19 @@ export default function Add() {
     }
   }
 
-  async function confirmStartScan(extraIncludeExts: string[], watchAfterScan: boolean) {
+  async function confirmStartScan(
+    extraIncludeExts: string[],
+    watchAfterScan: boolean,
+    excludePaths: string[],
+  ) {
     if (!confirmPath) return;
     setBusy(confirmPath);
     try {
-      await api.ingestScan(confirmPath, { extraIncludeExts, watchAfterScan });
+      await api.ingestScan(confirmPath, {
+        extraIncludeExts,
+        watchAfterScan,
+        excludes: excludePaths,
+      });
       setConfirmPath(null);
       // Send the user where they can see progress
       navigate("/jobs");

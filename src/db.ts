@@ -66,7 +66,8 @@ export function openDb(): Database.Database {
       added_at INTEGER NOT NULL,
       last_scanned_at INTEGER,
       last_completed_at INTEGER,
-      watch_enabled INTEGER NOT NULL DEFAULT 1
+      watch_enabled INTEGER NOT NULL DEFAULT 1,
+      excludes TEXT NOT NULL DEFAULT '[]'
     );
     CREATE TABLE IF NOT EXISTS file_aliases (
       path TEXT PRIMARY KEY,
@@ -110,6 +111,11 @@ export function openDb(): Database.Database {
     // the file was added via a one-off pick rather than a watched folder.
     db.exec(`ALTER TABLE sources ADD COLUMN watched_root TEXT`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_sources_watched_root ON sources(watched_root)`);
+  }
+  // Add the excludes column on existing tables (idempotent).
+  const wrCols = db.prepare(`PRAGMA table_info(watched_roots)`).all() as { name: string }[];
+  if (!wrCols.some((c) => c.name === "excludes")) {
+    db.exec(`ALTER TABLE watched_roots ADD COLUMN excludes TEXT NOT NULL DEFAULT '[]'`);
   }
   return db;
 }
