@@ -1,90 +1,18 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type LibraryGroups, type LibraryGroup, type Health, type ClaudeConfigInfo, type Job } from "../lib/api.ts";
+import { api, type LibraryGroups, type LibraryGroup } from "../lib/api.ts";
 import { bytes } from "../lib/format.ts";
 import { FileIcon } from "../components/FileIcon.tsx";
 import JobProgress from "../components/JobProgress.tsx";
 import { BookIcon, FolderOpenIcon } from "../components/icons.tsx";
-import { useJobs } from "../lib/useJobs.ts";
 import FirstRunWizard from "../components/FirstRunWizard.tsx";
-import { ActiveJobsBanner } from "../components/JobsWidgets.tsx";
 
 type Mode = "folder" | "topic";
 
-/* ── System status strip ──────────────────────────────────────────
-   Persistent one-row indicator: MCP server health + agent connection
-   state. Lives at the top of Library so the user always sees whether
-   their AI tools can reach the library, without having to navigate
-   to Agents to check. Click anywhere → /agents. */
-function SystemBar() {
-  const [health, setHealth] = useState<Health | null>(null);
-  const [claude, setClaude] = useState<ClaudeConfigInfo | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    const tick = async () => {
-      try {
-        const [h, c] = await Promise.all([
-          api.health(),
-          api.claudeConfig().catch(() => null),
-        ]);
-        if (!alive) return;
-        setHealth(h);
-        setClaude(c);
-      } catch {}
-    };
-    tick();
-    const id = setInterval(tick, 10000);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
-  }, []);
-
-  const mcpReady = !!(health?.embed && health?.rerank);
-  const agentConnected =
-    claude?.detected.some((d) => d.exists && d.hasBitroveEntry) ?? false;
-
-  return (
-    <Link
-      to="/agents"
-      className="flex items-center gap-6 py-2.5 px-3 -mx-3 rounded-lg hover:bg-white transition mb-2 text-xs"
-    >
-      <StatusDot
-        ok={mcpReady}
-        label="MCP server"
-        detail={mcpReady ? "Ready" : "Warming up"}
-      />
-      <span className="text-stone-200">|</span>
-      <StatusDot
-        ok={agentConnected}
-        label="Claude Code"
-        detail={agentConnected ? "Connected" : "Not connected"}
-      />
-      <span className="ml-auto text-stone-400 hover:text-stone-700 transition">Configure →</span>
-    </Link>
-  );
-}
-
-function StatusDot({ ok, label, detail }: { ok: boolean; label: string; detail: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className="relative inline-block h-2 w-2">
-        {ok && <span className="absolute inset-0 rounded-full bg-emerald-500 animate-ping opacity-40" />}
-        <span className={"absolute inset-0 rounded-full " + (ok ? "bg-emerald-500" : "bg-stone-300")} />
-      </span>
-      <span className="text-stone-600">
-        <span className="font-medium text-stone-700">{label}</span>{" "}
-        <span className="text-stone-400">·</span>{" "}
-        <span className={ok ? "text-emerald-700" : "text-stone-500"}>{detail}</span>
-      </span>
-    </span>
-  );
-}
-
-// Job-related widgets (ActiveJobsBanner, RecentJobsRow) now live in
-// components/JobsWidgets.tsx and the Dashboard. Library focuses on
-// file information — leaving them here would compete with that.
+// Library is intentionally narrow in scope: "what's in my knowledge
+// base." SystemBar (MCP / Claude status) lives on /agents; indexing
+// progress lives on /dashboard. Both used to render here at the top
+// and crowded the main content below the fold.
 
 /* ── Watched roots ───────────────────────────────────────────────
    Folders Bitrove is actively keeping in sync with disk. Lives at
@@ -433,7 +361,6 @@ export default function Library() {
   const [query, setQuery] = useState("");
   const [classifyJobId, setClassifyJobId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
-  const { active } = useJobs(3000);
   const [watchedCount, setWatchedCount] = useState<number | null>(null);
   const [wizardDismissed, setWizardDismissed] = useState(false);
 
@@ -481,21 +408,22 @@ export default function Library() {
       : data?.groups ?? [];
 
   // First-run wizard renders only when: no indexed files, no watched
-  // roots, no in-flight jobs, and the user hasn't dismissed it this
-  // session. Once they kick off a scan it stops rendering naturally
-  // because `data` populates and `watchedCount` flips to >0.
+  // roots, and the user hasn't dismissed it this session. Once they
+  // kick off a scan it stops rendering naturally because `data`
+  // populates and `watchedCount` flips to >0.
   const showWizard =
     !wizardDismissed &&
     data !== null &&
     data.total_files === 0 &&
-    watchedCount === 0 &&
-    active.length === 0;
+    watchedCount === 0;
 
   return (
     <div>
-      <SystemBar />
-
-      <ActiveJobsBanner jobs={active} />
+      {/* Library is the "what's in my knowledge base" view. We deliberately
+          DO NOT render ActiveJobsBanner or SystemBar here — indexing
+          progress lives on the Dashboard, and MCP / Claude status lives
+          on the Agents page. Putting them here pushed the actual library
+          content below the fold on smaller windows. */}
 
       {showWizard && (
         <FirstRunWizard
@@ -504,55 +432,53 @@ export default function Library() {
         />
       )}
 
-      {!showWizard && <WatchedRootsSection />}
-
-      {!showWizard && <MissingFilesSection />}
-
-      <div className="flex items-baseline flex-wrap gap-3 mb-6">
-        <h1 className="t-display">Library</h1>
-        {data && (
-          <span className="text-stone-500 text-sm">
-            {data.total_files.toLocaleString()} files · {data.total_categories} {mode === "topic" ? "topics" : "folders"}
-            {mode === "topic" && data.untagged ? (
-              <span className="text-amber-700"> · {data.untagged} untagged</span>
-            ) : null}
-          </span>
-        )}
-        <div className="ml-auto flex items-center gap-2">
-          <div className="inline-flex rounded border border-stone-300 overflow-hidden bg-white">
-            <button
-              onClick={() => setMode("folder")}
-              className={
-                "inline-flex items-center gap-1.5 px-3 py-1 text-sm " +
-                (mode === "folder" ? "bg-stone-900 text-white" : "text-stone-700 hover:bg-stone-100")
-              }
+      {!showWizard && (
+        <div className="flex items-baseline flex-wrap gap-3 mb-6">
+          <h1 className="t-display">Library</h1>
+          {data && (
+            <span className="text-stone-500 text-sm">
+              {data.total_files.toLocaleString()} files · {data.total_categories} {mode === "topic" ? "topics" : "folders"}
+              {mode === "topic" && data.untagged ? (
+                <span className="text-amber-700"> · {data.untagged} untagged</span>
+              ) : null}
+            </span>
+          )}
+          <div className="ml-auto flex items-center gap-2">
+            <div className="inline-flex rounded border border-stone-300 overflow-hidden bg-white">
+              <button
+                onClick={() => setMode("folder")}
+                className={
+                  "inline-flex items-center gap-1.5 px-3 py-1 text-sm " +
+                  (mode === "folder" ? "bg-stone-900 text-white" : "text-stone-700 hover:bg-stone-100")
+                }
+              >
+                <FolderOpenIcon size={14} /> By folder
+              </button>
+              <button
+                onClick={() => setMode("topic")}
+                className={
+                  "inline-flex items-center gap-1.5 px-3 py-1 text-sm " +
+                  (mode === "topic" ? "bg-stone-900 text-white" : "text-stone-700 hover:bg-stone-100")
+                }
+              >
+                <BookIcon size={14} /> By topic
+              </button>
+            </div>
+            <Link
+              to="/dashboard"
+              className="text-sm px-3 py-1 rounded-md bg-stone-900 text-white font-medium hover:bg-stone-700"
             >
-              <FolderOpenIcon size={14} /> By folder
-            </button>
-            <button
-              onClick={() => setMode("topic")}
-              className={
-                "inline-flex items-center gap-1.5 px-3 py-1 text-sm " +
-                (mode === "topic" ? "bg-stone-900 text-white" : "text-stone-700 hover:bg-stone-100")
-              }
+              Add
+            </Link>
+            <Link
+              to="/sources"
+              className="text-sm text-stone-600 hover:text-stone-900 underline-offset-2 hover:underline"
             >
-              <BookIcon size={14} /> By topic
-            </button>
+              All files →
+            </Link>
           </div>
-          <Link
-            to="/dashboard"
-            className="text-sm px-3 py-1 rounded-md bg-stone-900 text-white font-medium hover:bg-stone-700"
-          >
-            Add
-          </Link>
-          <Link
-            to="/sources"
-            className="text-sm text-stone-600 hover:text-stone-900 underline-offset-2 hover:underline"
-          >
-            All files →
-          </Link>
         </div>
-      </div>
+      )}
 
       {err && (
         <div className="mb-4 p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded text-sm">
@@ -616,6 +542,18 @@ export default function Library() {
           <div className="text-sm">
             Click "Run classification" above to tag all {data.total_files} files.
           </div>
+        </div>
+      )}
+
+      {/* ── Maintenance ──────────────────────────────────────────
+         Coverage + housekeeping bits live below the actual library
+         content. Users come to /library to see "what's in here"
+         first; "where am I watching" + "what went missing" are
+         secondary, glanced-at-occasionally information. */}
+      {!showWizard && data && data.total_files > 0 && (
+        <div className="mt-16 pt-8 border-t border-stone-200">
+          <WatchedRootsSection />
+          <MissingFilesSection />
         </div>
       )}
 
