@@ -86,6 +86,23 @@ export type Job = {
   // so a user opening a finished failed job sees specific reasons,
   // not just the count.
   errorEvents?: { ts: number; path: string; error: string }[];
+  // Per-item event history (success + skip + error), capped at 5k
+  // entries. Sent inside the SSE snapshot so a late-joining client
+  // can render the activity log that already happened — without
+  // this, the row count silently lagged `done` by however many
+  // events fired before the EventSource connected.
+  recentItems?: {
+    ts: number;
+    path: string;
+    status:
+      | "ingested"
+      | "skipped-cached"
+      | "skipped-unsupported"
+      | "error"
+      | "skipped-mtime-touched"
+      | "aliased-duplicate";
+    error?: string;
+  }[];
   // Fatal error message for jobs that died before processing any
   // per-file events (e.g. permission denied at the root).
   fatalError?: string;
@@ -353,10 +370,20 @@ export const api = {
   getJob: (id: string) => j<Job>(`/api/ingest/jobs/${id}`),
   stopJob: (id: string) =>
     j<{ requested: true }>(`/api/ingest/jobs/${id}/stop`, { method: "POST" }),
-  streamJob: (id: string, onEvent: (ev: unknown) => void): (() => void) => {
+  streamJob: (
+    id: string,
+    handlers: {
+      onSnapshot: (job: Job) => void;
+      onProgress: (ev: unknown) => void;
+    },
+  ): (() => void) => {
     const es = new EventSource(`/api/ingest/jobs/${id}/stream`);
-    es.addEventListener("snapshot", (e) => onEvent(JSON.parse((e as MessageEvent).data)));
-    es.addEventListener("progress", (e) => onEvent(JSON.parse((e as MessageEvent).data)));
+    es.addEventListener("snapshot", (e) =>
+      handlers.onSnapshot(JSON.parse((e as MessageEvent).data) as Job),
+    );
+    es.addEventListener("progress", (e) =>
+      handlers.onProgress(JSON.parse((e as MessageEvent).data)),
+    );
     return () => es.close();
   },
 };

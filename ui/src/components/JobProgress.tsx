@@ -123,76 +123,96 @@ export default function JobProgress({
   const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // hydrateLog turns whatever per-item history the server hands us
+    // into the LogEntry[] shape this component renders. Called once
+    // from getJob (for stale finished jobs that don't get a stream
+    // snapshot) and once from the SSE snapshot when the stream opens.
+    const hydrateLog = (j: Job) => {
+      if (j.recentItems && j.recentItems.length > 0) {
+        setLog(
+          j.recentItems.slice(-MAX_LOG).map((e) => ({
+            ts: e.ts,
+            status: e.status,
+            path: e.path,
+            error: e.error,
+          })),
+        );
+      } else if (j.errorEvents && j.errorEvents.length > 0) {
+        // Fallback for jobs persisted before recentItems existed —
+        // surface at least the per-error history.
+        setLog(
+          j.errorEvents.map((e) => ({
+            ts: e.ts,
+            status: "error" as const,
+            path: e.path,
+            error: e.error,
+          })),
+        );
+      }
+    };
+
     api
       .getJob(jobId)
       .then((j) => {
         setJob(j);
-        // Backfill the activity log with persisted error events so a
-        // user opening a finished job sees specific failures instead
-        // of "(no per-file events captured in this stream)". Successful
-        // items aren't persisted (too noisy), but errors are exactly
-        // the reason someone opens a failed job after the fact.
-        if (j.errorEvents && j.errorEvents.length > 0) {
-          setLog(
-            j.errorEvents.map((e) => ({
-              ts: e.ts,
-              status: "error" as const,
-              path: e.path,
-              error: e.error,
-            })),
-          );
-        }
+        hydrateLog(j);
       })
       .catch(() => {});
-    const stop = api.streamJob(jobId, (raw) => {
-      const ev = raw as StreamEvent | Job;
-      if ("status" in ev && "kind" in ev && "id" in ev) {
-        setJob(ev as Job);
-        return;
-      }
-      const e = ev as StreamEvent;
-      if ((e.type === "done" || e.type === "stopped") && (e.duplicates ?? 0) > 0) {
-        setDupSummary({
-          count: e.duplicates ?? 0,
-          samples: e.duplicateSamples ?? [],
-        });
-      }
-      setJob((prev) =>
-        prev
-          ? {
-              ...prev,
-              total: e.total ?? prev.total,
-              done: e.done ?? prev.done,
-              current: e.current ?? prev.current,
-              status:
-                e.type === "done"
-                  ? "done"
-                  : e.type === "stopped"
-                    ? "stopped"
-                    : e.type === "failed"
-                      ? "failed"
-                      : "running",
-              ingested: e.ingested ?? prev.ingested,
-              errors: e.errors ?? prev.errors,
-              finishedAt:
-                e.type === "done" || e.type === "failed" || e.type === "stopped"
-                  ? Date.now()
-                  : prev.finishedAt,
-            }
-          : prev,
-      );
-      if (e.type === "done" || e.type === "failed" || e.type === "stopped") {
-        if (onDone) setTimeout(onDone, 600);
-      }
-      if (e.type === "item" && e.current && e.status) {
-        const entry: LogEntry = {
-          ts: Date.now(),
-          status: e.status,
-          path: e.current,
-          error: e.error,
-        };
-        setLog((prev) => [...prev.slice(-(MAX_LOG - 1)), entry]);
-      }
+
+    const stop = api.streamJob(jobId, {
+      // Snapshot fires once per connect with the authoritative state
+      // and the full recentItems ring — overwrite local state with it
+      // so the activity log matches `done` instead of lagging by
+      // however many events happened before the EventSource attached.
+      onSnapshot: (j) => {
+        setJob(j);
+        hydrateLog(j);
+      },
+      onProgress: (raw) => {
+        const e = raw as StreamEvent;
+        if ((e.type === "done" || e.type === "stopped") && (e.duplicates ?? 0) > 0) {
+          setDupSummary({
+            count: e.duplicates ?? 0,
+            samples: e.duplicateSamples ?? [],
+          });
+        }
+        setJob((prev) =>
+          prev
+            ? {
+                ...prev,
+                total: e.total ?? prev.total,
+                done: e.done ?? prev.done,
+                current: e.current ?? prev.current,
+                status:
+                  e.type === "done"
+                    ? "done"
+                    : e.type === "stopped"
+                      ? "stopped"
+                      : e.type === "failed"
+                        ? "failed"
+                        : "running",
+                ingested: e.ingested ?? prev.ingested,
+                errors: e.errors ?? prev.errors,
+                finishedAt:
+                  e.type === "done" || e.type === "failed" || e.type === "stopped"
+                    ? Date.now()
+                    : prev.finishedAt,
+              }
+            : prev,
+        );
+        if (e.type === "done" || e.type === "failed" || e.type === "stopped") {
+          if (onDone) setTimeout(onDone, 600);
+        }
+        if (e.type === "item" && e.current && e.status) {
+          const entry: LogEntry = {
+            ts: Date.now(),
+            status: e.status,
+            path: e.current,
+            error: e.error,
+          };
+          setLog((prev) => [...prev.slice(-(MAX_LOG - 1)), entry]);
+        }
+      },
     });
     return stop;
   }, [jobId]);

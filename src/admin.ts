@@ -1056,7 +1056,11 @@ app.get("/api/library/topics", (_req, res) => {
 
 // ── /api/ingest/jobs ──────────────────────────────────────
 app.get("/api/ingest/jobs", (_req, res) => {
-  res.json({ jobs: listJobs() });
+  // Strip recentItems from the list payload — only the detail page
+  // needs the per-item ring buffer, and 5k entries × dozens of jobs
+  // would balloon this response unnecessarily.
+  const jobs = listJobs().map(({ recentItems: _r, ...rest }) => rest);
+  res.json({ jobs });
 });
 
 // Cooperative stop: signal the job to stop after current item finishes.

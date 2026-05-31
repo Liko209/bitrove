@@ -24,6 +24,13 @@ export type JobErrorRecord = {
   error: string;
 };
 
+export type JobItemRecord = {
+  ts: number;
+  path: string;
+  status: "ingested" | "skipped-cached" | "skipped-unsupported" | "error" | "skipped-mtime-touched" | "aliased-duplicate";
+  error?: string;
+};
+
 export type JobState = {
   id: string;
   kind: "ingest" | "scan";
@@ -41,12 +48,21 @@ export type JobState = {
   // errors are the whole reason a user opens a finished job, so we
   // keep up to ERROR_HISTORY_CAP of them inline.
   errorEvents?: JobErrorRecord[];
+  // In-memory ring of every item event seen so far (success or skip
+  // included). The SSE snapshot sends this to late-arriving
+  // subscribers so the activity log matches `done`, instead of
+  // showing N-K rows because the client missed the first K events
+  // before connecting. NOT persisted to disk — would balloon
+  // jobs.json on big scans, and a UI opened after an admin restart
+  // is already in the "lost the stream" branch.
+  recentItems?: JobItemRecord[];
   // Top-level failure message for jobs that died before processing
   // any individual file (permission denied at root, etc).
   fatalError?: string;
 };
 
 const ERROR_HISTORY_CAP = 500;
+const ITEM_HISTORY_CAP = 5000;
 
 const STATES = new Map<string, JobState>();
 const EMITTERS = new Map<string, EventEmitter>();
@@ -112,10 +128,14 @@ function persistNow(): void {
     STATES.clear();
     for (const j of all) STATES.set(j.id, j);
   }
+  // Strip recentItems before writing — it's an in-memory replay ring
+  // for the live SSE snapshot, not something we want to balloon
+  // jobs.json with (5k entries × 100 jobs = potentially many MB).
+  const onDisk = all.map(({ recentItems: _r, ...rest }) => rest);
   const p = jobsFilePath();
   try {
     mkdirSync(dirname(p), { recursive: true });
-    writeFileSync(p, JSON.stringify(all, null, 2));
+    writeFileSync(p, JSON.stringify(onDisk, null, 2));
   } catch (e) {
     console.warn("[jobs] failed to persist:", (e as Error).message);
   }
@@ -177,6 +197,20 @@ export function emitJob(id: string, ev: JobEvent): void {
     state.done = ev.done;
     state.total = ev.total;
     state.current = ev.current;
+    // Append to the bounded in-memory log so the SSE snapshot can
+    // replay it to late subscribers. Cap is 5k entries — beyond
+    // that we drop the oldest, since the UI shows a windowed log
+    // anyway and the user usually cares about recent activity.
+    if (!state.recentItems) state.recentItems = [];
+    state.recentItems.push({
+      ts: Date.now(),
+      path: ev.current,
+      status: ev.status,
+      error: ev.error,
+    });
+    if (state.recentItems.length > ITEM_HISTORY_CAP) {
+      state.recentItems.splice(0, state.recentItems.length - ITEM_HISTORY_CAP);
+    }
     if (ev.status === "ingested") state.ingested++;
     if (ev.status === "error") {
       state.errors++;
