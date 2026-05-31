@@ -33,6 +33,18 @@ export default function ScanConfigure() {
 
   const [preview, setPreview] = useState<Preview | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Poll service health so we can refuse to start a scan if the
+  // embed (or reranker) llama-server isn't running — usually because
+  // the model file isn't on disk. Without this the user would queue
+  // a job that immediately fails every item with "503 model loading".
+  const [health, setHealth] = useState<{ embed: boolean; rerank: boolean } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const tick = () => api.health().then((h) => alive && setHealth(h)).catch(() => {});
+    tick();
+    const t = setInterval(tick, 5000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
   // Per-scan overrides.
   const [overrides, setOverrides] = useState<Set<string>>(new Set());
   // Absolute path prefixes excluded by the user via the tree picker.
@@ -125,6 +137,12 @@ export default function ScanConfigure() {
 
   async function start() {
     if (!preview || effectiveIndexable === 0 || perm.state !== "granted") return;
+    if (health && (!health.embed || !health.rerank)) {
+      setErr(
+        "Embedding service isn't running — the model may not be installed. Open Settings → Models to install one before starting a scan.",
+      );
+      return;
+    }
     setSubmitting(true);
     try {
       if (runWhen === "tonight") {
@@ -179,6 +197,31 @@ export default function ScanConfigure() {
       {err && (
         <div className="mb-4 p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded text-sm">
           {err}
+        </div>
+      )}
+
+      {health && (!health.embed || !health.rerank) && (
+        <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm">
+          <div className="flex items-baseline gap-2 mb-1">
+            <span className="font-medium text-amber-900">
+              {!health.embed && !health.rerank
+                ? "Embedding and reranker services aren't running"
+                : !health.embed
+                  ? "Embedding service isn't running"
+                  : "Reranker isn't running"}
+            </span>
+          </div>
+          <div className="text-xs text-amber-800 mb-3">
+            Bitrove needs an embedding model on disk to index files.
+            Install or pick a tier in Settings → Models before starting
+            a scan.
+          </div>
+          <Link
+            to="/settings?section=models"
+            className="inline-flex text-xs px-3 py-1 rounded bg-amber-900 text-white hover:bg-amber-800"
+          >
+            Open Settings → Models
+          </Link>
         </div>
       )}
 
@@ -468,9 +511,18 @@ export default function ScanConfigure() {
         <button
           onClick={start}
           disabled={
-            !preview || effectiveIndexable === 0 || perm.state !== "granted" || submitting
+            !preview ||
+            effectiveIndexable === 0 ||
+            perm.state !== "granted" ||
+            submitting ||
+            !!(health && (!health.embed || !health.rerank))
           }
           className="px-5 py-1.5 rounded-md text-sm font-medium bg-stone-900 text-white hover:bg-stone-700 disabled:opacity-40 disabled:cursor-not-allowed"
+          title={
+            health && (!health.embed || !health.rerank)
+              ? "Install an embedding model in Settings → Models first"
+              : undefined
+          }
         >
           {submitting
             ? "Starting…"

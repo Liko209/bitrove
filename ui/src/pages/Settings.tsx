@@ -584,7 +584,24 @@ function ModelsSection() {
   const [hardware, setHardware] = useState<Hardware | null>(null);
   const [pendingTier, setPendingTier] = useState<Tier | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [installed, setInstalled] = useState<Record<string, boolean>>({});
+  const [removing, setRemoving] = useState<Tier | null>(null);
   const bridge = window.bitrove;
+
+  // Pull installed state for every tier from main process so we can
+  // show which models actually sit on disk (not just which one is
+  // marked active in settings).
+  const refreshInstalled = () => {
+    if (!bridge?.listTiers) return;
+    bridge
+      .listTiers()
+      .then((d) => {
+        const map: Record<string, boolean> = {};
+        for (const t of d.tiers) map[t.id] = t.installed;
+        setInstalled(map);
+      })
+      .catch(() => {});
+  };
 
   useEffect(() => {
     api
@@ -594,7 +611,31 @@ function ModelsSection() {
     if (bridge?.getHardware) {
       bridge.getHardware().then(setHardware).catch(() => {});
     }
+    refreshInstalled();
   }, []);
+
+  async function uninstall(t: Tier) {
+    if (!bridge?.uninstallTier) return;
+    if (t === activeTier) {
+      alert("Switch to a different tier before removing this one.");
+      return;
+    }
+    const meta = tierMeta(t);
+    const ok = window.confirm(
+      `Remove ${meta.label} (${formatBytes(meta.embedSizeBytes)}) from disk?\n\nYou can always re-download it later from this page.`,
+    );
+    if (!ok) return;
+    setRemoving(t);
+    setErr(null);
+    try {
+      await bridge.uninstallTier(t);
+      refreshInstalled();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setRemoving(null);
+    }
+  }
 
   const recommended = hardware ? recommendTier(hardware.totalRamGB) : null;
 
@@ -649,12 +690,13 @@ function ModelsSection() {
             const isActive = t.id === activeTier;
             const isPending = t.id === pendingTier;
             const isRecommended = t.id === recommended;
+            const isInstalled = !!installed[t.id];
+            const isRemoving = removing === t.id;
             return (
-              <button
+              <div
                 key={t.id}
-                onClick={() => selectTier(t.id)}
                 className={
-                  "w-full text-left p-4 rounded-xl border transition " +
+                  "w-full p-4 rounded-xl border transition " +
                   (isPending
                     ? "border-stone-900 bg-stone-50"
                     : isActive
@@ -662,27 +704,56 @@ function ModelsSection() {
                       : "border-stone-200 bg-white hover:border-stone-400")
                 }
               >
-                <div className="flex items-baseline justify-between gap-3 mb-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium text-stone-900">{t.label}</span>
-                    {isActive && (
-                      <span className="label-eyebrow text-emerald-700">Active</span>
-                    )}
-                    {isRecommended && !isActive && (
-                      <span className="label-eyebrow text-stone-500">Recommended</span>
-                    )}
+                <button
+                  type="button"
+                  onClick={() => selectTier(t.id)}
+                  className="w-full text-left"
+                >
+                  <div className="flex items-baseline justify-between gap-3 mb-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-stone-900">{t.label}</span>
+                      {isActive && (
+                        <span className="label-eyebrow text-emerald-700">Active</span>
+                      )}
+                      {isInstalled && !isActive && (
+                        <span className="label-eyebrow text-blue-700">Installed</span>
+                      )}
+                      {isRecommended && !isActive && (
+                        <span className="label-eyebrow text-stone-500">Recommended</span>
+                      )}
+                    </div>
+                    <span className="text-xs text-stone-500 tabular-nums shrink-0">
+                      {formatBytes(t.embedSizeBytes)} · ~{t.estRamGB} GB RAM · ~{t.estDocsPerSec} docs/s
+                    </span>
                   </div>
-                  <span className="text-xs text-stone-500 tabular-nums shrink-0">
-                    {formatBytes(t.embedSizeBytes)} · ~{t.estRamGB} GB RAM · ~{t.estDocsPerSec} docs/s
-                  </span>
-                </div>
-                <div className="text-xs text-stone-500 mt-1">{t.blurb}</div>
-                <div className="text-[11px] text-stone-400 font-mono mt-1">
-                  {t.embedName} · {t.embedDim}-dim
-                </div>
-              </button>
+                  <div className="text-xs text-stone-500 mt-1">{t.blurb}</div>
+                  <div className="text-[11px] text-stone-400 font-mono mt-1">
+                    {t.embedName} · {t.embedDim}-dim
+                  </div>
+                </button>
+                {isInstalled && !isActive && (
+                  <div className="mt-3 pt-3 border-t border-stone-100 flex items-center justify-between gap-3">
+                    <span className="text-[11px] text-stone-500">
+                      On disk: {formatBytes(t.embedSizeBytes)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); uninstall(t.id); }}
+                      disabled={isRemoving}
+                      className="text-xs px-2.5 py-1 rounded border border-stone-300 text-stone-700 hover:bg-stone-100 disabled:opacity-40"
+                    >
+                      {isRemoving ? "Removing…" : "Remove"}
+                    </button>
+                  </div>
+                )}
+              </div>
             );
           })}
+        </div>
+
+        <div className="mt-4 text-[11px] text-stone-500">
+          Reranker (bge-reranker-v2-m3, ~438 MB) is shared across all tiers
+          and cannot be removed individually.
         </div>
       </section>
 

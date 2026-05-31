@@ -275,6 +275,31 @@ export function cancelDownload(id: ModelSpec["id"]): void {
   CANCEL_REQ.add(id);
 }
 
+// Delete a tier's embed file (and any half-finished .part) from disk.
+// Reranker is shared across tiers and never uninstalled here. Caller
+// is responsible for ensuring this tier is NOT the currently active
+// one — uninstalling the active tier would leave the running
+// llama-server pointing at a deleted file.
+export async function uninstallTier(tier: Tier): Promise<{ removedBytes: number }> {
+  const target = tierById(tier);
+  const dir = modelsDir();
+  const full = join(dir, target.embed.filename);
+  const tmp = full + ".part";
+  let removedBytes = 0;
+  for (const p of [full, tmp]) {
+    if (existsSync(p)) {
+      try {
+        removedBytes += statSync(p).size;
+        await unlink(p);
+      } catch (e) {
+        throw new Error(`failed to remove ${p}: ${(e as Error).message}`);
+      }
+    }
+  }
+  refreshModelStatuses();
+  return { removedBytes };
+}
+
 // Download a specific spec (used by tier-switch flow). Tier-aware
 // callers should use this directly; downloadModel(id) is preserved
 // for the legacy IPC that just expects "embed"/"rerank".

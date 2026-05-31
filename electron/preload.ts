@@ -62,6 +62,10 @@ const bitrove = {
   downloadForTier: (
     tier: "light" | "standard" | "quality" | "max",
   ): Promise<{ ok: true }> => ipcRenderer.invoke("setup:downloadForTier", tier),
+  uninstallTier: (
+    tier: "light" | "standard" | "quality" | "max",
+  ): Promise<{ removedBytes: number }> =>
+    ipcRenderer.invoke("setup:uninstallTier", tier),
   getServicesState: (): Promise<Record<string, ServiceState>> =>
     ipcRenderer.invoke("services:state"),
   openExternal: (url: string): Promise<boolean> =>

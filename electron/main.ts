@@ -402,6 +402,30 @@ ipcMain.handle("setup:cancelModel", (_e, id: "embed" | "rerank") => {
   return true;
 });
 ipcMain.handle("setup:isReady", () => allModelsReady());
+
+// Uninstall a tier's embed file. Refuses to remove the active tier
+// since the running llama-server is holding the file — yanking it
+// would crash the embed service mid-search.
+ipcMain.handle(
+  "setup:uninstallTier",
+  async (_e, tier: "light" | "standard" | "quality" | "max") => {
+    const { uninstallTier } = await import("./setup.ts");
+    const { readFile } = await import("node:fs/promises");
+    const settingsPath = join(app.getPath("userData"), "ingest-settings.json");
+    let active: string = "light";
+    try {
+      const raw = await readFile(settingsPath, "utf8");
+      const j = JSON.parse(raw);
+      if (j.activeModelTier) active = j.activeModelTier;
+    } catch {}
+    if (tier === active) {
+      throw new Error(
+        `cannot uninstall ${tier} while it is the active tier — switch to another tier first`,
+      );
+    }
+    return uninstallTier(tier);
+  },
+);
 ipcMain.handle("setup:autodetectSources", () => autodetectSources());
 ipcMain.handle("setup:readConfig", () => readConfig());
 ipcMain.handle("setup:writeConfig", (_e, partial: unknown) =>
