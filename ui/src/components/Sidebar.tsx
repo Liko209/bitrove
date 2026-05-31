@@ -8,11 +8,7 @@
 
 import type { ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
-import {
-  BookIcon,
-  FolderOpenIcon,
-  SettingsGearIcon,
-} from "./icons.tsx";
+import { BookIcon, FolderOpenIcon, SettingsGearIcon } from "./icons.tsx";
 
 type Item = {
   to: string;
@@ -78,31 +74,23 @@ export function Sidebar() {
       // anywhere empty to move the window — but every interactive child
       // overrides with app-no-drag so clicks aren't swallowed.
     >
-      {/* Spacer matching the top-bar height in App.tsx so the traffic
-          lights at (16, 13) sit clear of the wordmark below. */}
-      <div className="h-10 shrink-0" />
-
-      <div className="px-3 pt-2 pb-4 app-no-drag">
-        <Link
-          to="/"
-          className="block px-1 hover:opacity-70 transition-opacity"
-          aria-label="Bitrove"
+      {/* Wordmark sits flush with the top of the rail. The top bar
+          above (h-10) is on the OTHER flex row, so this aside already
+          starts below the traffic lights — no spacer needed. The
+          wordmark is plain text (not a Link); macOS sidebars treat the
+          app name as a label, not a Home control. */}
+      <div className="px-3 pt-3 pb-4">
+        <span
+          className="block px-1 text-[24px] font-medium tracking-tight text-stone-900 select-none"
+          style={{
+            fontFamily:
+              '"New York", "Newsreader", "Lyon Text", "Instrument Serif", Georgia, "Times New Roman", serif',
+            letterSpacing: "-0.02em",
+            lineHeight: 1,
+          }}
         >
-          <span
-            className="text-[24px] font-medium tracking-tight text-stone-900"
-            style={{
-              // Same editorial serif stack the page titles use, but at
-              // ~2/3 the size so the rail wordmark reads as a logo
-              // rather than competing with the page hero.
-              fontFamily:
-                '"New York", "Newsreader", "Lyon Text", "Instrument Serif", Georgia, "Times New Roman", serif',
-              letterSpacing: "-0.02em",
-              lineHeight: 1,
-            }}
-          >
-            Bitrove
-          </span>
-        </Link>
+          Bitrove
+        </span>
       </div>
 
       <nav className="px-2 flex flex-col gap-0.5 app-no-drag">
