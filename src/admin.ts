@@ -464,21 +464,39 @@ app.get("/api/index/status", (_req, res) => {
   const sourceCount = (db
     .prepare(`SELECT COUNT(*) AS n FROM sources WHERE missing_since IS NULL`)
     .get() as { n: number }).n;
+  // Per-source check. After a wipe, individual sources end up with
+  // chunk_count=0 even if a handful of OTHER sources were re-ingested
+  // since (those have chunk_count > 0, so SUM > 0 — the aggregate
+  // check passes but the library is still broken). chunk_bearing
+  // means text/catalog, not image-only; chunk_count > 0 should be
+  // invariant after a successful ingest. Any (chunk_bearing, count=0)
+  // pair is a wiped-but-not-re-ingested source.
+  const zeroChunkSources = (db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM sources
+       WHERE missing_since IS NULL AND needs_ocr = 0 AND chunk_count = 0`,
+    )
+    .get() as { n: number }).n;
   db.close();
   const activeJobs = listJobs(10).filter((j) => j.status === "running").length;
-  // (a) chunk counts disagree about how many chunks should exist.
+  // (a) Aggregate disagrees: chunks table has fewer rows than sources
+  // claim. Catches partial wipes where some sources kept their counts.
   const partialWipe =
     expectedChunkSum > 0 && chunkCount < expectedChunkSum;
-  // (b) wholly reset: chunk-bearing sources exist but they all say
-  // "0 chunks" — that's not a valid post-ingest state.
-  const fullWipe =
-    chunkBearingSources > 0 && expectedChunkSum === 0;
-  const orphanedSources = activeJobs === 0 && (partialWipe || fullWipe);
+  // (b) Per-source: any chunk-bearing source claiming zero chunks is
+  // necessarily a wiped source the watcher's mtime-based skip would
+  // refuse to re-ingest (sources mtime unchanged → skip-cached). This
+  // is the case the user saw: 1 source got re-ingested (mtime
+  // changed externally) so SUM = 1 = chunkCount, but the other 50
+  // are still empty.
+  const someSourcesEmpty = activeJobs === 0 && zeroChunkSources > 0;
+  const orphanedSources = activeJobs === 0 && (partialWipe || someSourcesEmpty);
   res.json({
     chunkCount,
     sourceCount,
     chunkBearingSources,
     expectedChunkSum,
+    zeroChunkSources,
     activeJobs,
     dimMismatch: mismatch,
     orphanedSources,

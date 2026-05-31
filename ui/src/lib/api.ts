@@ -323,6 +323,7 @@ export const api = {
       sourceCount: number;
       chunkBearingSources: number;
       expectedChunkSum: number;
+      zeroChunkSources: number;
       activeJobs: number;
       dimMismatch: { stored: number; current: number } | null;
       orphanedSources: boolean;
