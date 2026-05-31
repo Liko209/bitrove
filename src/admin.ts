@@ -413,18 +413,32 @@ app.get("/api/index/status", (_req, res) => {
   const chunkCount = (db
     .prepare(`SELECT COUNT(*) AS n FROM chunks`)
     .get() as { n: number }).n;
+  // Only count sources that actually expected chunks (text + catalog).
+  // image-only PDFs are needs_ocr=1 with chunk_count=0 by design and
+  // shouldn't make the index look broken.
+  const chunkBearingSources = (db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM sources
+       WHERE missing_since IS NULL AND needs_ocr = 0`,
+    )
+    .get() as { n: number }).n;
   const sourceCount = (db
     .prepare(`SELECT COUNT(*) AS n FROM sources WHERE missing_since IS NULL`)
     .get() as { n: number }).n;
   db.close();
+  // "Healthy" requires the chunk count to roughly match the number of
+  // chunk-bearing sources. A 51-source / 1-chunk library is the
+  // user-visible shape of an index whose chunks were wiped at some
+  // point — flag it so the UI can prompt for a re-ingest. The 50% gate
+  // is generous; in practice a text file produces multiple chunks so a
+  // healthy ratio is >> 1.
+  const drastic = chunkBearingSources > 0 && chunkCount < chunkBearingSources * 0.5;
   res.json({
     chunkCount,
     sourceCount,
+    chunkBearingSources,
     dimMismatch: mismatch,
-    // True iff sources exist but no chunks — usually the user-visible
-    // shape of a destructive rebuild that already happened in some
-    // previous version, or an index that was wiped and never re-ingested.
-    needsReingest: mismatch != null || (sourceCount > 0 && chunkCount === 0),
+    needsReingest: mismatch != null || drastic,
   });
 });
 

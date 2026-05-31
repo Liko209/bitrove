@@ -323,6 +323,7 @@ export const api = {
     j<{
       chunkCount: number;
       sourceCount: number;
+      chunkBearingSources: number;
       dimMismatch: { stored: number; current: number } | null;
       needsReingest: boolean;
     }>("/api/index/status"),

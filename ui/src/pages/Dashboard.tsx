@@ -215,6 +215,8 @@ export default function Dashboard() {
         Add content, watch indexing happen, see what's already in the library.
       </p>
 
+      <IndexHealthBanner />
+
       <ActiveJobsBanner jobs={active} />
 
       <ScheduledTasksSection />
@@ -552,5 +554,58 @@ function ScheduledTasksSection() {
         })}
       </div>
     </section>
+  );
+}
+
+/* ── Index health banner ──────────────────────────────────────
+   Pings /api/index/status periodically and surfaces "you've got
+   indexed files but no chunks" or "dim mismatch" right at the top
+   of the Dashboard. Renders nothing on a healthy library — we
+   don't want a permanent green status panel. */
+
+function IndexHealthBanner() {
+  const navigate = useNavigate();
+  const [status, setStatus] = useState<Awaited<ReturnType<typeof api.indexStatus>> | null>(null);
+
+  useEffect(() => {
+    const tick = () => api.indexStatus().then(setStatus).catch(() => {});
+    tick();
+    const t = setInterval(tick, 15000);
+    return () => clearInterval(t);
+  }, []);
+
+  if (!status || !status.needsReingest) return null;
+
+  const dimLine = status.dimMismatch
+    ? `Stored ${status.dimMismatch.stored}-dim vectors but active model is ${status.dimMismatch.current}-dim.`
+    : `${status.sourceCount.toLocaleString()} files registered but only ${status.chunkCount.toLocaleString()} searchable chunks — your vectors got wiped at some point.`;
+
+  return (
+    <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200">
+      <div className="flex items-start gap-3">
+        <div className="shrink-0 mt-0.5">
+          <span className="inline-block w-2 h-2 rounded-full bg-amber-500" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-amber-900 mb-1">
+            Search index needs rebuild
+          </div>
+          <p className="text-xs text-amber-900/85 leading-relaxed mb-3">
+            {dimLine} Nothing is searchable until you rebuild + re-ingest.
+            Two steps: open Settings to rebuild the empty vector table,
+            then come back and re-scan your watched folders below.
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => navigate("/settings?section=models")}
+              className="text-xs px-3 py-1.5 rounded-md bg-amber-900 text-white hover:bg-amber-800"
+            >
+              Open Settings → Rebuild index
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
