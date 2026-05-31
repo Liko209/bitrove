@@ -90,7 +90,7 @@ export function UpdateBanner() {
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
           <span className="flex-1 truncate">{message}</span>
           <Link
-            to="/settings"
+            to="/settings?section=about"
             className="shrink-0 text-xs px-3 py-1 rounded-md bg-amber-900 text-white font-medium hover:bg-amber-800 transition"
           >
             {cta}

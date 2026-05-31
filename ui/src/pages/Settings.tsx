@@ -11,6 +11,7 @@
 //   - About: app version, models, update controls.
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../lib/api.ts";
 import { UpdateFooter } from "../components/UpdateSection.tsx";
 
@@ -22,8 +23,32 @@ const TABS: { id: Section; label: string }[] = [
   { id: "about", label: "About" },
 ];
 
+function isSection(s: string | null): s is Section {
+  return s === "filters" || s === "watcher" || s === "about";
+}
+
 export default function Settings() {
-  const [section, setSection] = useState<Section>("filters");
+  // Section in URL so external callers (UpdateBanner, future deep
+  // links from notifications) can land directly on the right tab.
+  // Two-way sync: clicking a tab also rewrites the URL so refresh /
+  // share keeps you on the same view.
+  const [params, setParams] = useSearchParams();
+  const initial = isSection(params.get("section")) ? (params.get("section") as Section) : "filters";
+  const [section, setSectionState] = useState<Section>(initial);
+  function setSection(next: Section) {
+    setSectionState(next);
+    setParams({ section: next }, { replace: true });
+  }
+  // Pick up URL changes that happen while we're already mounted
+  // (e.g. the user clicks the UpdateBanner while sitting on
+  // /settings?section=filters).
+  useEffect(() => {
+    const fromUrl = params.get("section");
+    if (isSection(fromUrl) && fromUrl !== section) {
+      setSectionState(fromUrl);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
   return (
     <div className="max-w-4xl mx-auto pb-12">
       <h1 className="t-display mb-8">Settings</h1>
