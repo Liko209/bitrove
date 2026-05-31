@@ -21,6 +21,8 @@ import {
   allTags,
   countOcrPending,
   listOcrPending,
+  dimMismatch,
+  rebuildChunkVecsForCurrentDim,
 } from "./db.ts";
 import { ingestFile } from "./ingest.ts";
 import { classify } from "./extract.ts";
@@ -400,6 +402,47 @@ app.get("/api/ocr/status", (_req, res) => {
   readIngestSettings().then((s) => {
     res.json({ enabled: !!s.ocrEnabled, pending });
   });
+});
+
+// ── /api/index ────────────────────────────────────────────
+// Surface chunk_vecs dim health to the UI so the user (not the
+// process) decides whether to wipe their index.
+app.get("/api/index/status", (_req, res) => {
+  const db = openDb();
+  const mismatch = dimMismatch(db);
+  const chunkCount = (db
+    .prepare(`SELECT COUNT(*) AS n FROM chunks`)
+    .get() as { n: number }).n;
+  const sourceCount = (db
+    .prepare(`SELECT COUNT(*) AS n FROM sources WHERE missing_since IS NULL`)
+    .get() as { n: number }).n;
+  db.close();
+  res.json({
+    chunkCount,
+    sourceCount,
+    dimMismatch: mismatch,
+    // True iff sources exist but no chunks — usually the user-visible
+    // shape of a destructive rebuild that already happened in some
+    // previous version, or an index that was wiped and never re-ingested.
+    needsReingest: mismatch != null || (sourceCount > 0 && chunkCount === 0),
+  });
+});
+
+// Destructive: drops chunk_vecs, clears chunks, resets sources.
+// Returns the count we just nuked so the UI can confirm + the user
+// can audit. Caller is responsible for showing a confirm dialog —
+// admin/server-side blindly trusts the request because the only
+// callers should be (a) Settings → Models "Rebuild index" button
+// and (b) the tier-switch flow after the user accepted the warning
+// modal.
+app.post("/api/index/rebuild", (req, res) => {
+  const db = openDb();
+  const before = (db
+    .prepare(`SELECT COUNT(*) AS n FROM chunks`)
+    .get() as { n: number }).n;
+  rebuildChunkVecsForCurrentDim(db);
+  db.close();
+  res.json({ ok: true, chunksDropped: before });
 });
 
 app.put("/api/ocr/enabled", async (req, res) => {

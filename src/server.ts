@@ -13,6 +13,7 @@ import {
   listSources,
   stats,
   aliasesForSources,
+  dimMismatch,
   type ChunkKind,
   type SearchHit,
 } from "./db.ts";
@@ -85,8 +86,28 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const kinds = args.kinds as ChunkKind[] | undefined;
     const wantsRerank = args.rerank !== false; // default true
 
-    const vec = await embedQuery(query);
     const db = openDb();
+    // Refuse to run if the stored chunk_vecs dim doesn't match what
+    // we'd embed the query at. We deliberately don't drop+rebuild
+    // here (that was the bug that wiped users' indexes silently);
+    // instead, tell Claude Code so the user knows to open Bitrove
+    // and rebuild explicitly.
+    const mismatch = dimMismatch(db);
+    if (mismatch) {
+      db.close();
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text:
+              `Bitrove index needs rebuild: stored chunk_vecs are ${mismatch.stored}-dim but the active embed model produces ${mismatch.current}-dim vectors. ` +
+              `Open Bitrove → Settings → Models → "Rebuild index" to fix. ` +
+              `No data was modified by this query.`,
+          },
+        ],
+      };
+    }
+    const vec = await embedQuery(query);
     // 想 rerank 时过取候选，失败降级也只用前 k 个
     const candidateK = wantsRerank ? Math.min(k * 4, 50) : k;
     const candidates = search(db, vec, candidateK, kinds);

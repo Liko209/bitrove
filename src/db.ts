@@ -135,37 +135,73 @@ export function openDb(): Database.Database {
   // ── Tier-switch detection ────────────────────────────────────
   // If the user switched embed tiers (or upgraded into a tier with a
   // different dim), the chunk_vecs table was created against the OLD
-  // dim. sqlite-vec will refuse mismatched inserts; we have to drop
-  // and recreate. Old embeddings are useless across vector spaces
-  // anyway, so we clear chunks too. sources rows survive but get
-  // chunk_count reset to 0, prompting the watcher / a manual re-scan
-  // to re-embed.
+  // dim. sqlite-vec will refuse mismatched inserts.
+  //
+  // We deliberately DO NOT auto-rebuild here. A previous version did,
+  // which silently destroyed the user's index any time a process
+  // opened the db with a different EMBED_DIM env (e.g. the MCP child
+  // started without BITROVE_MODEL_TIER set). Now we just record the
+  // mismatch on the returned handle and let the caller decide:
+  //   - admin startup → /api/index/status surfaces it, UI shows a
+  //     "Index needs rebuild" prompt with a Rebuild button.
+  //   - MCP → returns a friendly error to Claude Code; never destroys
+  //     data behind the user's back.
+  // Actually-rebuilding the table is rebuildChunkVecsForCurrentDim()
+  // below, which is only called from explicit user actions
+  // (SwitchTierModal, the rebuild endpoint).
   try {
     const row = db
       .prepare(`SELECT value FROM meta WHERE key = 'embed_dim'`)
       .get() as { value: string } | undefined;
     const storedDim = row ? Number(row.value) : null;
     if (storedDim !== null && storedDim !== EMBED_DIM) {
-      console.log(
-        `[db] embed dim changed (${storedDim} → ${EMBED_DIM}); rebuilding chunk_vecs and clearing chunks`,
+      console.warn(
+        `[db] embed dim mismatch on open: stored=${storedDim}, current=${EMBED_DIM}. ` +
+          `Not rebuilding automatically — user must rebuild explicitly.`,
       );
-      const tx = db.transaction(() => {
-        db.exec(`DROP TABLE IF EXISTS chunk_vecs`);
-        db.exec(`DELETE FROM chunks`);
-        db.exec(`UPDATE sources SET chunk_count = 0`);
-        db.exec(
-          `CREATE VIRTUAL TABLE chunk_vecs USING vec0(embedding float[${EMBED_DIM}])`,
-        );
-      });
-      tx();
+      (db as Database.Database & { __dimMismatch?: { stored: number; current: number } }).__dimMismatch =
+        { stored: storedDim, current: EMBED_DIM };
+    } else if (storedDim === null) {
+      // First open on a fresh db: stamp the current dim so future
+      // opens can detect drift.
+      db.prepare(
+        `INSERT INTO meta(key, value) VALUES('embed_dim', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      ).run(String(EMBED_DIM));
     }
-    db.prepare(
-      `INSERT INTO meta(key, value) VALUES('embed_dim', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    ).run(String(EMBED_DIM));
   } catch (e) {
     console.warn(`[db] embed_dim meta probe failed:`, (e as Error).message);
   }
   return db;
+}
+
+// Report whether the db on this handle was opened with an EMBED_DIM
+// that doesn't match what's stamped on disk. Callers use this to
+// decide whether vector ops are safe.
+export function dimMismatch(
+  db: Database.Database,
+): { stored: number; current: number } | null {
+  return (db as Database.Database & { __dimMismatch?: { stored: number; current: number } })
+    .__dimMismatch ?? null;
+}
+
+// Explicit, destructive rebuild — drops chunk_vecs, clears chunks,
+// resets sources.chunk_count, recreates chunk_vecs with EMBED_DIM,
+// updates meta. ONLY call this from a path the user has explicitly
+// confirmed (SwitchTierModal, /api/index/rebuild).
+export function rebuildChunkVecsForCurrentDim(db: Database.Database): void {
+  const tx = db.transaction(() => {
+    db.exec(`DROP TABLE IF EXISTS chunk_vecs`);
+    db.exec(`DELETE FROM chunks`);
+    db.exec(`UPDATE sources SET chunk_count = 0`);
+    db.exec(
+      `CREATE VIRTUAL TABLE chunk_vecs USING vec0(embedding float[${EMBED_DIM}])`,
+    );
+    db.prepare(
+      `INSERT INTO meta(key, value) VALUES('embed_dim', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    ).run(String(EMBED_DIM));
+  });
+  tx();
+  delete (db as Database.Database & { __dimMismatch?: unknown }).__dimMismatch;
 }
 
 // Wipe every chunk + the vec0 table contents. Used by P1.6 when the

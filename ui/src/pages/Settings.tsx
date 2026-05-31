@@ -757,6 +757,8 @@ function ModelsSection() {
         </div>
       </section>
 
+      <IndexHealthSection />
+
       <OcrSection />
 
 
@@ -913,6 +915,122 @@ function OcrSection() {
             will automatically OCR any that come up.
           </div>
         )}
+      </div>
+    </section>
+  );
+}
+
+/* ── Index health ───────────────────────────────────────────────
+   Surfaces vector-table integrity. Lives next to the OCR section
+   because they're both "things that affect what's actually
+   searchable" — and because the user needs an explicit, named
+   button to rebuild rather than have openDb() do it silently. */
+
+function IndexHealthSection() {
+  const navigate = useNavigate();
+  const [status, setStatus] = useState<{
+    chunkCount: number;
+    sourceCount: number;
+    dimMismatch: { stored: number; current: number } | null;
+    needsReingest: boolean;
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const refresh = () =>
+    api
+      .indexStatus()
+      .then(setStatus)
+      .catch((e) => setErr((e as Error).message));
+
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 10000);
+    return () => clearInterval(t);
+  }, []);
+
+  if (!status) return null;
+  // Healthy = no mismatch AND at least one chunk per indexed source.
+  // We don't render at all in the healthy case — Settings is busy
+  // enough without "everything is fine" status panels.
+  if (!status.needsReingest && !status.dimMismatch) return null;
+
+  async function rebuild() {
+    if (!window.confirm(
+      "Rebuild the vector index?\n\n" +
+        "This drops all stored embeddings and resets every source's chunk count to 0. " +
+        "Your file list stays — but searches will return no results until you re-run a scan on each watched folder. " +
+        "Continue?",
+    )) {
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.rebuildIndex();
+      await refresh();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const title = status.dimMismatch
+    ? "Index needs rebuild (model dim mismatch)"
+    : "Index has source files but no chunks";
+
+  const body = status.dimMismatch
+    ? `Your stored vectors are ${status.dimMismatch.stored}-dim but the active embed model produces ${status.dimMismatch.current}-dim vectors. Searches will fail until you rebuild + re-ingest.`
+    : `${status.sourceCount.toLocaleString()} source${status.sourceCount === 1 ? "" : "s"} are indexed but no chunks exist — likely a previous wipe that was never followed by a re-ingest. Searches will return nothing.`;
+
+  return (
+    <section className="mt-10">
+      <h2 className="t-h2 mb-2">Index health</h2>
+      <p className="text-stone-600 text-sm mb-6">
+        Bitrove never wipes your index automatically. If the vector
+        table goes out of sync with the active model — for example
+        after switching tiers — you have to opt into the rebuild here.
+      </p>
+
+      {err && (
+        <div className="mb-4 p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded text-sm">
+          {err}
+        </div>
+      )}
+
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+        <div className="font-medium text-amber-900 mb-1">{title}</div>
+        <p className="text-xs text-amber-900/80 leading-relaxed mb-3">
+          {body}
+        </p>
+        <div className="text-[11px] text-amber-800/80 mb-3 tabular-nums">
+          {status.sourceCount.toLocaleString()} sources ·{" "}
+          {status.chunkCount.toLocaleString()} chunks
+          {status.dimMismatch && (
+            <>
+              {" "}· stored {status.dimMismatch.stored}-dim · active{" "}
+              {status.dimMismatch.current}-dim
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={rebuild}
+            disabled={busy}
+            className="text-sm px-3 py-1.5 rounded-md bg-amber-900 text-white hover:bg-amber-800 disabled:opacity-40"
+          >
+            {busy ? "Rebuilding…" : "Rebuild index"}
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate("/library")}
+            className="text-sm px-3 py-1.5 rounded-md text-amber-900 hover:bg-amber-100"
+          >
+            Then go to Library →
+          </button>
+        </div>
       </div>
     </section>
   );

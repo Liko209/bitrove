@@ -316,6 +316,20 @@ export const api = {
       body: JSON.stringify({ tier }),
     }),
   // OCR toggle + batch rerun for image-only PDFs.
+  // Index integrity. Exposes a dim-mismatch flag so the UI can
+  // prompt the user to rebuild explicitly rather than have the
+  // db layer wipe their chunks behind their back.
+  indexStatus: () =>
+    j<{
+      chunkCount: number;
+      sourceCount: number;
+      dimMismatch: { stored: number; current: number } | null;
+      needsReingest: boolean;
+    }>("/api/index/status"),
+  rebuildIndex: () =>
+    j<{ ok: true; chunksDropped: number }>("/api/index/rebuild", {
+      method: "POST",
+    }),
   ocrStatus: () => j<{ enabled: boolean; pending: number }>("/api/ocr/status"),
   setOcrEnabled: (enabled: boolean) =>
     j<{ enabled: boolean }>("/api/ocr/enabled", {

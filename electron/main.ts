@@ -254,7 +254,24 @@ ipcMain.handle(
     // model; admin inherits the new BITROVE_MODEL_TIER env.
     await restartServices();
 
-    // 4. Trigger re-ingest: hit admin's scan endpoint for each
+    // 4. Explicitly rebuild chunk_vecs at the new dim. openDb() no
+    //    longer does this automatically (silent data loss waiting to
+    //    happen — see the MCP -32603 incident). The user already
+    //    confirmed in SwitchTierModal that switching tiers wipes
+    //    their existing chunks, so calling the rebuild endpoint here
+    //    is honoring that consent rather than violating it.
+    try {
+      await fetch("http://127.0.0.1:8770/api/index/rebuild", {
+        method: "POST",
+      });
+    } catch (e) {
+      console.warn(
+        "[switchTier] index/rebuild failed; re-ingest will fail until user runs it manually:",
+        (e as Error).message,
+      );
+    }
+
+    // 5. Trigger re-ingest: hit admin's scan endpoint for each
     //    watched root. Done over HTTP so we don't have to share
     //    db handles across processes.
     try {
