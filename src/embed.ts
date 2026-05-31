@@ -1,19 +1,68 @@
-// 通过本地 llama-server 调 bge-m3 embedding
+// Local llama-server embedding adapter. Branches per active model
+// tier (light = bge-m3, standard/quality/max = Qwen3-Embedding-* of
+// varying size).
 //
-// 重要：bge-m3 使用 CLS pooling，由 llama-server 启动参数 --pooling cls 保证。
-// bge-m3 在 retrieval 任务下 query 和 passage 都不需要 prompt prefix（与 e5 不同）。
+// Pooling + prompt strategy:
+//   - bge-m3: CLS pooling (set on llama-server --pooling cls), no
+//     query / passage prefix (it's a true bi-encoder).
+//   - Qwen3-Embedding: last-token pooling, query side needs an
+//     "Instruct: ... \nQuery: " prefix; document side is raw text.
+// We pick which strategy to use at runtime based on
+// BITROVE_EMBED_MODEL (set by electron/services.ts when spawning the
+// admin process — see P2.9 for the spawn-side change).
 
-// electron/services.ts passes EMBED_URL as the bare host (no path) so
-// admin can also probe `${EMBED_URL}/health`. Accept either form: if
-// the env value already names /v1/embeddings, use it as-is; otherwise
-// append. This avoided a long-running misery where POSTs went to the
-// llama-server root and came back 404 File Not Found.
+import { readIngestSettings } from "./settings.ts";
+
 const EMBED_URL_RAW = process.env.EMBED_URL ?? "http://127.0.0.1:8765";
 const EMBED_URL = EMBED_URL_RAW.includes("/v1/embeddings")
   ? EMBED_URL_RAW
   : `${EMBED_URL_RAW.replace(/\/+$/, "")}/v1/embeddings`;
 
-export const EMBED_DIM = 1024;
+// Per-tier vector dims. Has to match electron/setup.ts TIERS.embed.dim
+// and the chunk_vecs schema in db.ts (which uses EMBED_DIM at
+// CREATE TABLE time).
+type Tier = "light" | "standard" | "quality" | "max";
+const DIM_BY_TIER: Record<Tier, number> = {
+  light: 1024,
+  standard: 1024,
+  quality: 2560,
+  max: 4096,
+};
+
+// One-time tier resolution. Cached so we don't re-read the JSON on
+// every embed() call. The admin restarts on tier change (P1.6) so
+// the cache stays correct for the lifetime of the process.
+let activeTier: Tier | null = null;
+async function resolveTier(): Promise<Tier> {
+  if (activeTier) return activeTier;
+  // BITROVE_MODEL_TIER lets electron override settings.ts (useful in
+  // dev / tests where we want to force a tier without writing to
+  // ingest-settings.json).
+  const envTier = process.env.BITROVE_MODEL_TIER as Tier | undefined;
+  if (envTier && envTier in DIM_BY_TIER) {
+    activeTier = envTier;
+    return envTier;
+  }
+  const s = await readIngestSettings();
+  activeTier = (s.activeModelTier ?? "light") as Tier;
+  return activeTier;
+}
+
+export async function getEmbedDim(): Promise<number> {
+  const t = await resolveTier();
+  return DIM_BY_TIER[t];
+}
+
+// Synchronous fallback used by db.ts at openDb() time when the
+// settings file hasn't been read yet. Reads BITROVE_MODEL_TIER env
+// (set by electron) or falls back to 1024 (light/standard).
+export function getEmbedDimSync(): number {
+  const envTier = process.env.BITROVE_MODEL_TIER as Tier | undefined;
+  if (envTier && envTier in DIM_BY_TIER) return DIM_BY_TIER[envTier];
+  return 1024;
+}
+
+export const EMBED_DIM = getEmbedDimSync();
 
 // 替换不成对的 UTF-16 surrogate 为 U+FFFD，避免下游 JSON 解析失败
 function sanitizeForJson(s: string): string {
@@ -31,8 +80,49 @@ function sanitizeForJson(s: string): string {
 const RETRYABLE_STATUS = new Set([502, 503, 504]);
 const MAX_ATTEMPTS = 6;
 
+// Qwen3-Embedding's official query-side instruction. Document side
+// is raw text. Keeping the prompt short — Qwen handles arbitrary
+// task descriptions, but a generic retrieval-targeted instruction is
+// enough for our use.
+const QWEN_QUERY_PROMPT_PREFIX =
+  "Instruct: Given a search query, retrieve relevant passages that answer the query\nQuery: ";
+
+async function withPromptForRole(
+  text: string,
+  role: "query" | "passage",
+): Promise<string> {
+  const t = await resolveTier();
+  if (t === "light") return text; // bge-m3: no prefix either side
+  // Qwen3-Embedding-*: query gets the instruct prefix, passage stays raw
+  return role === "query" ? QWEN_QUERY_PROMPT_PREFIX + text : text;
+}
+
 export async function embed(texts: string[]): Promise<number[][]> {
-  const clean = texts.map(sanitizeForJson);
+  // Backward-compat shim: legacy callers (catalog cards, anything
+  // not yet branched) get passage-side embeddings, which is
+  // correct for indexing. Search code paths should call
+  // embedQuery() explicitly.
+  return embedMany(texts, "passage");
+}
+
+export async function embedQuery(text: string): Promise<number[]> {
+  const [v] = await embedMany([text], "query");
+  return v;
+}
+
+export async function embedPassage(text: string): Promise<number[]> {
+  const [v] = await embedMany([text], "passage");
+  return v;
+}
+
+async function embedMany(
+  texts: string[],
+  role: "query" | "passage",
+): Promise<number[][]> {
+  const withPrompt = await Promise.all(
+    texts.map((t) => withPromptForRole(t, role)),
+  );
+  const clean = withPrompt.map(sanitizeForJson);
   let lastErr = "";
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let r: Response;
@@ -71,7 +161,9 @@ function backoff(attempt: number): number {
   return Math.min(1000 * 2 ** (attempt - 1), 4000);
 }
 
+// Legacy single-text API. Treats input as a passage (correct for the
+// catalog-card flow that historically called it). Search-side paths
+// should switch to embedQuery() explicitly.
 export async function embedOne(text: string): Promise<number[]> {
-  const [v] = await embed([text]);
-  return v;
+  return embedPassage(text);
 }

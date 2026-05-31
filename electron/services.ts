@@ -57,10 +57,25 @@ const PORTS: Record<ServiceName, number> = {
   rerank: 8766,
 };
 
-const MODEL_FILES: Record<"embed" | "rerank", string> = {
-  embed: "bge-m3-Q4_K_M.gguf",
-  rerank: "bge-reranker-v2-m3-Q4_K_M.gguf",
-};
+import { TIERS, RERANKER_SPEC, tierById, type Tier } from "./setup.ts";
+
+// activeTier is read at spawn time from the renderer-managed settings
+// file. Reranker file is fixed across all tiers; embed file changes.
+function readActiveTier(): Tier {
+  try {
+    const userData = app.getPath("userData");
+    const p = join(userData, "ingest-settings.json");
+    if (existsSync(p)) {
+      const j = JSON.parse(require("node:fs").readFileSync(p, "utf8"));
+      if (j.activeModelTier) return j.activeModelTier as Tier;
+    }
+  } catch {}
+  return "light";
+}
+function modelFileFor(name: "embed" | "rerank"): string {
+  if (name === "rerank") return RERANKER_SPEC.filename;
+  return tierById(readActiveTier()).embed.filename;
+}
 
 const STATE: Record<ServiceName, ServiceState> = {
   admin: { name: "admin", port: PORTS.admin, status: "stopped" },
@@ -135,6 +150,9 @@ export async function startAdmin(): Promise<void> {
     // admin would fall back to cwd/data, which is read-only in packaged
     // builds.
     BITROVE_USER_DATA: app.getPath("userData"),
+    // Lets src/embed.ts + src/db.ts know which tier we're running on
+    // without round-tripping ingest-settings.json on every call.
+    BITROVE_MODEL_TIER: readActiveTier(),
   };
 
   // In packaged mode the admin entry runs inside Electron's bundled Node;
@@ -187,7 +205,7 @@ export async function startLlama(name: "embed" | "rerank"): Promise<void> {
   notify();
 
   const binary = llamaServerBinary();
-  const modelFile = join(modelsDir(), MODEL_FILES[name]);
+  const modelFile = join(modelsDir(), modelFileFor(name));
   if (!existsSync(modelFile)) {
     STATE[name].status = "missing-dep";
     STATE[name].detail = `model not found: ${modelFile}`;
@@ -210,9 +228,14 @@ export async function startLlama(name: "embed" | "rerank"): Promise<void> {
     "--ubatch-size", "8192",
     "--log-disable",
   ];
+  // Pooling is per-embed-model: bge-m3 uses CLS, Qwen3-Embedding-*
+  // uses last-token. Reranker doesn't take --pooling.
+  const tier = readActiveTier();
+  const pooling = name === "embed" ? tierById(tier).embed.pooling ?? "cls" : null;
   const specificArgs = name === "embed"
-    ? ["--embedding", "--pooling", "cls"]
+    ? ["--embedding", "--pooling", pooling!]
     : ["--reranking"];
+  svcLog(name, `tier=${tier} pooling=${pooling ?? "n/a"} model=${modelFile}`);
 
   svcLog(name, `spawn ${binary} (model=${modelFile})`);
   const child = spawn(binary, [...commonArgs, ...specificArgs], {

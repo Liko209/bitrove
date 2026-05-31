@@ -45,6 +45,12 @@ export function openDb(): Database.Database {
     CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vecs USING vec0(
       embedding float[${EMBED_DIM}]
     );
+    -- Stash whatever dim the chunk_vecs table was originally created
+    -- with so we can detect tier switches that need a rebuild.
+    CREATE TABLE IF NOT EXISTS meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS sources (
       source_path TEXT PRIMARY KEY,
       kind TEXT NOT NULL,
@@ -117,7 +123,54 @@ export function openDb(): Database.Database {
   if (!wrCols.some((c) => c.name === "excludes")) {
     db.exec(`ALTER TABLE watched_roots ADD COLUMN excludes TEXT NOT NULL DEFAULT '[]'`);
   }
+
+  // ── Tier-switch detection ────────────────────────────────────
+  // If the user switched embed tiers (or upgraded into a tier with a
+  // different dim), the chunk_vecs table was created against the OLD
+  // dim. sqlite-vec will refuse mismatched inserts; we have to drop
+  // and recreate. Old embeddings are useless across vector spaces
+  // anyway, so we clear chunks too. sources rows survive but get
+  // chunk_count reset to 0, prompting the watcher / a manual re-scan
+  // to re-embed.
+  try {
+    const row = db
+      .prepare(`SELECT value FROM meta WHERE key = 'embed_dim'`)
+      .get() as { value: string } | undefined;
+    const storedDim = row ? Number(row.value) : null;
+    if (storedDim !== null && storedDim !== EMBED_DIM) {
+      console.log(
+        `[db] embed dim changed (${storedDim} → ${EMBED_DIM}); rebuilding chunk_vecs and clearing chunks`,
+      );
+      const tx = db.transaction(() => {
+        db.exec(`DROP TABLE IF EXISTS chunk_vecs`);
+        db.exec(`DELETE FROM chunks`);
+        db.exec(`UPDATE sources SET chunk_count = 0`);
+        db.exec(
+          `CREATE VIRTUAL TABLE chunk_vecs USING vec0(embedding float[${EMBED_DIM}])`,
+        );
+      });
+      tx();
+    }
+    db.prepare(
+      `INSERT INTO meta(key, value) VALUES('embed_dim', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    ).run(String(EMBED_DIM));
+  } catch (e) {
+    console.warn(`[db] embed_dim meta probe failed:`, (e as Error).message);
+  }
   return db;
+}
+
+// Wipe every chunk + the vec0 table contents. Used by P1.6 when the
+// user changes embed tier — old vectors can't be searched with the
+// new model regardless of dim. sources rows stay so the watcher /
+// next scan re-ingests them automatically.
+export function dropAllChunks(db: Database.Database): void {
+  const tx = db.transaction(() => {
+    db.exec(`DELETE FROM chunks`);
+    db.exec(`DELETE FROM chunk_vecs`);
+    db.exec(`UPDATE sources SET chunk_count = 0`);
+  });
+  tx();
 }
 
 export function insertChunk(

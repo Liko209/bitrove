@@ -6,7 +6,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { embedOne } from "./embed.ts";
+import { embedQuery } from "./embed.ts";
 import {
   openDb,
   search,
@@ -85,7 +85,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const kinds = args.kinds as ChunkKind[] | undefined;
     const wantsRerank = args.rerank !== false; // default true
 
-    const vec = await embedOne(query);
+    const vec = await embedQuery(query);
     const db = openDb();
     // 想 rerank 时过取候选，失败降级也只用前 k 个
     const candidateK = wantsRerank ? Math.min(k * 4, 50) : k;
