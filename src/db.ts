@@ -716,6 +716,10 @@ export type ListSourcesOpts = {
   path_contains?: string;
   limit?: number;
   offset?: number;
+  // Default false: hide rows whose file is gone (watcher already
+  // surfaces them via the dedicated "missing" pane). Callers that
+  // explicitly want to see ghosts (debug, admin views) pass true.
+  includeMissing?: boolean;
 };
 
 export type ListSourcesResult = {
@@ -742,6 +746,9 @@ export function listSources(db: Database.Database, opts: ListSourcesOpts = {}): 
   if (opts.path_contains) {
     where.push("source_path LIKE ? ESCAPE '\\'");
     params.push("%" + opts.path_contains.replace(/[%_\\]/g, "\\$&") + "%");
+  }
+  if (!opts.includeMissing) {
+    where.push("missing_since IS NULL");
   }
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 

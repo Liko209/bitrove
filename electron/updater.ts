@@ -298,20 +298,25 @@ async function manualSwapInstall(zipPath: string): Promise<void> {
     throw new Error(`extracted bundle not found at ${newApp}`);
   }
 
+  // Pass paths as positional args ($1/$2/$3) instead of interpolating
+  // them into the script body. If a user installs Bitrove under a path
+  // containing quotes, $, or backticks (e.g. an external volume named
+  // weirdly), the previous string-interpolation form would have led to
+  // shell-injection-style breakage during rm -rf.
   const script = `#!/bin/bash
 set -e
 sleep 1
-rm -rf "${target}"
-mv "${newApp}" "${target}"
-xattr -cr "${target}" 2>/dev/null || true
-open "${target}"
-rm -rf "${stageDir}" 2>/dev/null || true
+rm -rf -- "$1"
+mv -- "$2" "$1"
+xattr -cr "$1" 2>/dev/null || true
+open "$1"
+rm -rf -- "$3" 2>/dev/null || true
 `;
   const scriptPath = join(stageDir, "swap.sh");
   writeFileSync(scriptPath, script, { mode: 0o755 });
   FILE_LOGGER.info("manualSwapInstall: spawning swap script", scriptPath);
 
-  const child = spawn("/bin/bash", [scriptPath], {
+  const child = spawn("/bin/bash", [scriptPath, target, newApp, stageDir], {
     detached: true,
     stdio: "ignore",
   });

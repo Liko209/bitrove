@@ -381,7 +381,7 @@ function LibraryEmpty() {
         reads them on this Mac and nothing leaves the device.
       </p>
       <Link
-        to="/add"
+        to="/dashboard"
         className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-stone-900 text-white text-sm font-medium hover:bg-stone-700"
       >
         Add your first folder →
@@ -540,7 +540,7 @@ export default function Library() {
             </button>
           </div>
           <Link
-            to="/add"
+            to="/dashboard"
             className="text-sm px-3 py-1 rounded-md bg-stone-900 text-white font-medium hover:bg-stone-700"
           >
             Add

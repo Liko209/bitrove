@@ -524,6 +524,7 @@ app.get("/api/sources", (req, res) => {
     path_contains: req.query.path_contains as string | undefined,
     limit: req.query.limit ? Number(req.query.limit) : 50,
     offset: req.query.offset ? Number(req.query.offset) : 0,
+    includeMissing: req.query.include_missing === "1",
   });
   const aliasMap = aliasesForSources(
     db,

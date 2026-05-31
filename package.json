@@ -5,7 +5,7 @@
   "private": true,
   "main": "electron/.dist/main/index.js",
   "scripts": {
-    "ingest": "TROVE_CLI=ingest tsx src/ingest.ts",
+    "ingest": "BITROVE_CLI=ingest tsx src/ingest.ts",
     "scan": "tsx src/scan.ts",
     "server": "tsx src/server.ts",
     "query": "tsx src/query.ts",

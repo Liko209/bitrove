@@ -155,8 +155,8 @@ export default function ScanConfigure() {
     return (
       <div className="max-w-3xl mx-auto">
         <h1 className="t-display mb-3">Scan</h1>
-        <p className="text-stone-600 text-sm">Missing path. Go back to Add and pick a folder.</p>
-        <Link to="/add" className="text-sm underline">← Back to Add</Link>
+        <p className="text-stone-600 text-sm">Missing path. Go back to the dashboard and pick a folder.</p>
+        <Link to="/dashboard" className="text-sm underline">← Back to dashboard</Link>
       </div>
     );
   }
@@ -167,8 +167,8 @@ export default function ScanConfigure() {
   return (
     <div className="max-w-3xl mx-auto pb-20">
       <div className="mb-6">
-        <Link to="/add" className="text-xs text-stone-500 hover:text-stone-900 underline-offset-2 hover:underline">
-          ← Back to Add
+        <Link to="/dashboard" className="text-xs text-stone-500 hover:text-stone-900 underline-offset-2 hover:underline">
+          ← Back to dashboard
         </Link>
       </div>
       <h1 className="t-display mb-2">Configure scan</h1>
@@ -460,7 +460,7 @@ export default function ScanConfigure() {
             : "—"}
         </span>
         <Link
-          to="/add"
+          to="/dashboard"
           className="ml-auto px-3 py-1.5 rounded-md text-sm font-medium text-stone-700 hover:bg-stone-100"
         >
           Cancel

@@ -285,7 +285,7 @@ export async function startAll(): Promise<void> {
 export async function restartServices(): Promise<void> {
   console.log("[services] restart requested");
   await stopAll();
-  await startServices();
+  await startAll();
 }
 
 export function stopAll(): Promise<void> {
