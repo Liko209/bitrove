@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api, type Job } from "../lib/api.ts";
 import { splitPath, formatDurationSeconds } from "../lib/format.ts";
 
@@ -206,6 +207,19 @@ export default function JobProgress({
     }
   };
 
+  const navigate = useNavigate();
+  const [retrying, setRetrying] = useState(false);
+  const handleRetry = async () => {
+    setRetrying(true);
+    try {
+      const r = await api.retryFailed(jobId);
+      navigate(`/jobs/${r.jobId}`);
+    } catch (e) {
+      alert((e as Error).message);
+      setRetrying(false);
+    }
+  };
+
   if (!job) return <div className="text-sm text-stone-500">Loading job…</div>;
 
   const pct = job.total > 0 ? Math.round((job.done / job.total) * 100) : 0;
@@ -244,6 +258,19 @@ export default function JobProgress({
                 <rect x="5.5" y="2" width="2.5" height="6" rx="0.5" />
               </svg>
               {stopRequested ? "Stopping…" : "Pause after current"}
+            </button>
+          )}
+          {isTerminal && (job.errorEvents?.length ?? 0) > 0 && (
+            <button
+              onClick={handleRetry}
+              disabled={retrying}
+              className="shrink-0 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-stone-900 hover:bg-stone-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium border border-stone-900"
+              title="Re-ingest only the files that errored. Skips files that no longer exist on disk."
+            >
+              ↻
+              {retrying
+                ? "Starting…"
+                : `Retry ${job.errorEvents!.length} failed file${job.errorEvents!.length === 1 ? "" : "s"}`}
             </button>
           )}
         </div>

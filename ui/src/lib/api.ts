@@ -291,6 +291,12 @@ export const api = {
       )[];
     }>("/api/watcher/history"),
   listJobs: () => j<{ jobs: Job[] }>("/api/ingest/jobs"),
+  // Retry just the errored files of a finished job. Returns the new
+  // job id; caller can navigate to /jobs/<newJobId> to watch it.
+  retryFailed: (id: string) =>
+    j<{ jobId: string; total: number }>(`/api/ingest/retry/${id}`, {
+      method: "POST",
+    }),
   getJob: (id: string) => j<Job>(`/api/ingest/jobs/${id}`),
   stopJob: (id: string) =>
     j<{ requested: true }>(`/api/ingest/jobs/${id}/stop`, { method: "POST" }),

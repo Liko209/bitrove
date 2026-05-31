@@ -244,6 +244,90 @@ app.put("/api/settings/ingest", async (req, res) => {
   }
 });
 
+// ── /api/ingest/retry/:id ─────────────────────────────────
+// Re-runs only the files that errored in a previous job. Reads
+// errorEvents from the persisted JobState (v0.0.41+), filters out
+// any path that no longer exists on disk, and starts a new ingest
+// job with the filtered list. New job's description references the
+// original so the activity feed is traceable. Caller follows the
+// returned jobId into /jobs/:id to watch progress.
+app.post("/api/ingest/retry/:id", async (req, res) => {
+  const id = req.params.id;
+  const original = getJob(id);
+  if (!original) return res.status(404).json({ error: "job not found" });
+  if (!original.errorEvents || original.errorEvents.length === 0) {
+    return res.status(400).json({ error: "no recorded errors to retry" });
+  }
+  // Dedupe + keep only files still present on disk; vanished files
+  // would just error again the same way.
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  for (const e of original.errorEvents) {
+    if (seen.has(e.path)) continue;
+    seen.add(e.path);
+    if (!existsSync(e.path)) continue;
+    paths.push(e.path);
+  }
+  if (paths.length === 0) {
+    return res.status(400).json({
+      error: "none of the failed files still exist on disk",
+    });
+  }
+
+  const job = createJob(
+    "ingest",
+    `Retry ${paths.length} failed file${paths.length === 1 ? "" : "s"} from ${original.description}`,
+  );
+  res.json({ jobId: job.id, total: paths.length });
+
+  (async () => {
+    const t0 = Date.now();
+    emitJob(job.id, { type: "started", total: paths.length });
+    const db = openDb();
+    let done = 0;
+    let stoppedEarly = false;
+    try {
+      for (const p of paths) {
+        if (shouldStop(job.id)) {
+          stoppedEarly = true;
+          break;
+        }
+        // includeDuplicates=true: this is a remediation pass, the user
+        // already accepted these files implicitly by adding them.
+        // force=true: bypass the (mtime,size) skip — the file might
+        // genuinely be unchanged but we still want to retry it.
+        const r = await ingestFile(db, p, {
+          force: true,
+          includeDuplicates: true,
+          watchedRoot: original.kind === "scan" ? undefined : undefined,
+        });
+        done++;
+        emitJob(job.id, {
+          type: "item",
+          done,
+          total: paths.length,
+          current: p,
+          status: r.status,
+          error: r.status === "error" ? r.error : undefined,
+        });
+      }
+    } finally {
+      db.close();
+    }
+    const finalState = getJob(job.id)!;
+    emitJob(job.id, {
+      type: stoppedEarly ? "stopped" : "done",
+      done,
+      total: paths.length,
+      ingested: finalState.ingested,
+      errors: finalState.errors,
+      ms: Date.now() - t0,
+    });
+  })().catch((e) => {
+    emitJob(job.id, { type: "failed", error: (e as Error).message });
+  });
+});
+
 // ── /api/watcher/history ───────────────────────────────────
 // Recent (last 200) events from every watched root: scan start /
 // complete, debounce drains, ingest errors. Used by the Settings
