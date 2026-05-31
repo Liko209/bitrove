@@ -507,12 +507,22 @@ app.get("/api/stats", (_req, res) => {
   try {
     dbSize = statSync(dbPath).size;
   } catch {}
+  // Sum the bytes of the actual indexed files (not the DB file
+  // itself). The Dashboard's "Library size" tile shows this so a
+  // fresh install reads 0 instead of ~108 KB of empty schema /
+  // sqlite-vec scaffolding.
+  const indexedBytes = (db
+    .prepare(
+      `SELECT COALESCE(SUM(size_bytes), 0) AS n FROM sources
+       WHERE missing_since IS NULL`,
+    )
+    .get() as { n: number }).n;
   db.close();
   const total = s.reduce(
     (acc, r) => ({ sources: acc.sources + r.sources, chunks: acc.chunks + r.chunks }),
     { sources: 0, chunks: 0 },
   );
-  res.json({ byKind: s, total, dbPath, dbSize });
+  res.json({ byKind: s, total, dbPath, dbSize, indexedBytes });
 });
 
 // ── /api/sources (list) ───────────────────────────────────

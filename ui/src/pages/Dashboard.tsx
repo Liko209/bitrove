@@ -239,7 +239,7 @@ export default function Dashboard() {
           />
           <MetricTile
             label="Library size"
-            value={stats ? bytes(stats.dbSize) : "—"}
+            value={stats ? bytes(stats.indexedBytes) : "—"}
             sub="on this Mac"
           />
           <MetricTile

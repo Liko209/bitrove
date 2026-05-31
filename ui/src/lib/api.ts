@@ -7,6 +7,7 @@ export type Stats = {
   total: { sources: number; chunks: number };
   dbPath: string;
   dbSize: number;
+  indexedBytes: number;
 };
 
 export type FileBucket =
