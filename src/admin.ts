@@ -504,15 +504,30 @@ function mcpServerSpec(): {
   if (isPackagedAdmin) {
     const adminRoot = process.env.BITROVE_APP_ROOT;
     if (!adminRoot) throw new Error("BITROVE_APP_ROOT not set in packaged admin");
+    const env: Record<string, string> = {
+      ELECTRON_RUN_AS_NODE: "1",
+      EMBED_URL: process.env.EMBED_URL ?? "http://127.0.0.1:8765",
+      RERANK_URL: process.env.RERANK_URL ?? "http://127.0.0.1:8766",
+      KB_DB: process.env.KB_DB ?? join(adminRoot, "data", "index.db"),
+    };
+    // CRITICAL: pass the model tier + user-data dir to the MCP child.
+    // Without these the MCP process reads a default "light" tier from
+    // a settings.json it can't find, computes EMBED_DIM=1024, and on
+    // openDb() decides the existing chunk_vecs table (sized for the
+    // user's actual tier, e.g. 2560 for Quality) is "wrong" — drops
+    // it and recreates at 1024. That wipes every chunk the admin had
+    // just written and is what produced the "Expected 1024, received
+    // 2560" -32603 errors users were seeing from /mcp.
+    if (process.env.BITROVE_MODEL_TIER) {
+      env.BITROVE_MODEL_TIER = process.env.BITROVE_MODEL_TIER;
+    }
+    if (process.env.BITROVE_USER_DATA) {
+      env.BITROVE_USER_DATA = process.env.BITROVE_USER_DATA;
+    }
     return {
       command: process.execPath,
       args: [join(adminRoot, "mcp", "index.mjs")],
-      env: {
-        ELECTRON_RUN_AS_NODE: "1",
-        EMBED_URL: process.env.EMBED_URL ?? "http://127.0.0.1:8765",
-        RERANK_URL: process.env.RERANK_URL ?? "http://127.0.0.1:8766",
-        KB_DB: process.env.KB_DB ?? join(adminRoot, "data", "index.db"),
-      },
+      env,
     };
   }
   // Dev fallback
