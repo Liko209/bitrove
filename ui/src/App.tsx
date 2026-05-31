@@ -1,11 +1,11 @@
 import { Link, Route, Routes, useLocation, Navigate } from "react-router-dom";
 import Library from "./pages/Library.tsx";
 import Sources from "./pages/Sources.tsx";
-import Add from "./pages/Add.tsx";
+import Dashboard from "./pages/Dashboard.tsx";
 import ScanConfigure from "./pages/ScanConfigure.tsx";
+import JobDetail from "./pages/JobDetail.tsx";
 import Jobs from "./pages/Jobs.tsx";
 import Agents from "./pages/Agents.tsx";
-import Dashboard from "./pages/Dashboard.tsx";
 import Settings from "./pages/Settings.tsx";
 import { SettingsGearIcon } from "./components/icons.tsx";
 import { GlobalJobIndicator } from "./components/GlobalJobIndicator.tsx";
@@ -16,8 +16,8 @@ import { GlobalJobIndicator } from "./components/GlobalJobIndicator.tsx";
 // /jobs, /sources, /dashboard are still routable by URL or contextual
 // links but don't take up nav real estate.
 const NAV = [
+  { to: "/dashboard", label: "Dashboard" },
   { to: "/library", label: "Library" },
-  { to: "/add", label: "Add" },
   { to: "/agents", label: "Agents" },
 ];
 
@@ -85,19 +85,24 @@ export default function App() {
       </div>
       <main className="flex-1 max-w-7xl mx-auto w-full px-6 py-8">
         <Routes>
-          <Route path="/" element={<Navigate to="/library" replace />} />
+          {/* Dashboard is the default landing — it answers the most
+              common reason a user opens the app: "is anything running
+              right now, and should I add more?" */}
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/library" element={<Library />} />
-          <Route path="/add" element={<Add />} />
-          <Route path="/add/scan" element={<ScanConfigure />} />
           <Route path="/agents" element={<Agents />} />
           <Route path="/settings" element={<Settings />} />
-          {/* Reachable by URL or contextual link, not in primary nav */}
+          {/* Scan configure is reached from Dashboard quick-add */}
+          <Route path="/add/scan" element={<ScanConfigure />} />
+          {/* Power-user / contextual pages */}
           <Route path="/sources" element={<Sources />} />
           <Route path="/jobs" element={<Jobs />} />
-          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/jobs/:id" element={<JobDetail />} />
           {/* Legacy paths */}
+          <Route path="/add" element={<Navigate to="/dashboard" replace />} />
           <Route path="/connect" element={<Navigate to="/agents" replace />} />
-          <Route path="*" element={<Navigate to="/library" replace />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </main>
     </div>
