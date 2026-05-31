@@ -28,8 +28,8 @@
     "chokidar": "^5.0.0",
     "electron-updater": "^6.8.3",
     "express": "^5.2.1",
-    "pdf-parse": "^2.4.5",
     "sqlite-vec": "^0.1.9",
+    "unpdf": "^1.6.2",
     "xxhash-wasm": "^1.1.0"
   },
   "devDependencies": {

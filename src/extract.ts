@@ -5,10 +5,8 @@ import { readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { extname } from "node:path";
-import { createRequire } from "node:module";
 
 const exec = promisify(execFile);
-const require = createRequire(import.meta.url);
 
 export type ExtractedText = { text: string; warnings?: string[] };
 
@@ -32,13 +30,17 @@ export async function extractText(path: string): Promise<ExtractedText> {
   }
 
   if (ext === ".pdf") {
-    const mod = require("pdf-parse") as {
-      PDFParse: new (opts: { data: Buffer }) => { getText(): Promise<{ text: string }> };
-    };
+    // unpdf wraps pdfjs-dist for Node/serverless: ships its own
+    // polyfills for DOMMatrix / Path2D / ImageData so we don't
+    // pollute globalThis ourselves. Dynamic import keeps it lazy
+    // (the admin process only pays the cost when a PDF actually
+    // shows up in the queue). Aliased because this module also
+    // exports a function called extractText.
+    const { extractText: unpdfExtractText, getDocumentProxy } = await import("unpdf");
     const buf = await readFile(path);
-    const parser = new mod.PDFParse({ data: buf });
-    const r = await parser.getText();
-    return { text: r.text };
+    const doc = await getDocumentProxy(new Uint8Array(buf));
+    const { text } = await unpdfExtractText(doc, { mergePages: true });
+    return { text };
   }
 
   if (ext === ".docx" || ext === ".doc") {
