@@ -33,8 +33,13 @@ export function useJobs(pollIntervalMs = 2000): { jobs: Job[]; active: Job[]; re
   }, [pollIntervalMs]);
 
   const active = jobs.filter((j) => j.status === "running" || j.status === "queued");
+  // Terminal states the user might want to revisit — done, failed, and
+  // stopped (paused-by-user counts: they probably want to resume or
+  // see what went wrong).
   const recent = jobs
-    .filter((j) => j.status === "done" || j.status === "failed")
+    .filter(
+      (j) => j.status === "done" || j.status === "failed" || j.status === "stopped",
+    )
     .slice(0, 20);
   return { jobs, active, recent };
 }

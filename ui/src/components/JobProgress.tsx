@@ -66,12 +66,30 @@ const LOG_ICON: Record<ItemStatus, { ch: string; cls: string }> = {
 function LogLine({ entry }: { entry: LogEntry }) {
   const { name, dir } = splitPath(entry.path);
   const icon = LOG_ICON[entry.status];
+  const isError = entry.status === "error";
   return (
-    <div className="px-4 py-0.5 hover:bg-stone-100/60 flex items-baseline gap-2">
+    <div
+      className={
+        "px-4 py-0.5 flex items-baseline gap-2 " +
+        (isError ? "bg-rose-50/70 hover:bg-rose-50" : "hover:bg-stone-100/60")
+      }
+    >
       <span className={`shrink-0 w-3 inline-block text-center ${icon.cls}`}>{icon.ch}</span>
-      <span className="text-stone-800 truncate" title={entry.path}>{name}</span>
+      <span
+        className={"truncate " + (isError ? "text-rose-900" : "text-stone-800")}
+        title={entry.path}
+      >
+        {name}
+      </span>
       <span className="text-stone-500 truncate text-[10px]">{dir}</span>
-      {entry.error && <span className="text-rose-600 truncate ml-auto pl-2">{entry.error}</span>}
+      {/* Errors get their own dedicated wrap line so the message is
+          actually readable even on a long path — previously the
+          truncate would eat it on the right edge. */}
+      {entry.error && (
+        <div className="basis-full text-rose-700 text-[11px] pl-7 pr-4 leading-snug break-words">
+          {entry.error}
+        </div>
+      )}
     </div>
   );
 }
@@ -89,6 +107,7 @@ export default function JobProgress({
   const [log, setLog] = useState<LogEntry[]>([]);
   const [stopRequested, setStopRequested] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [errorsOnly, setErrorsOnly] = useState(false);
   const [dupSummary, setDupSummary] = useState<{
     count: number;
     samples: { path: string; duplicateOf: string }[];
@@ -323,45 +342,69 @@ export default function JobProgress({
       )}
 
       {/* ── Activity log ─────────────────────────────────────────────── */}
-      <div className="bg-stone-50">
-        <div className="px-4 py-2 border-b border-stone-200 flex items-center text-[11px]">
-          <span className="text-stone-500 uppercase tracking-wider font-medium">
-            Activity log
-          </span>
-          <span className="ml-2 text-stone-400 tabular-nums">{log.length}</span>
-          <span className="ml-auto flex items-center gap-3">
-            <span className="text-stone-400 hidden sm:inline">
-              <span className="text-stone-500">+</span> new
-              <span className="ml-2 text-stone-400">↻</span> cached
-              <span className="ml-2 text-rose-600">✗</span> error
-            </span>
-            <label className="text-stone-500 flex items-center gap-1 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={autoScroll}
-                onChange={(e) => setAutoScroll(e.target.checked)}
-                className="accent-stone-700"
-              />
-              Auto-scroll
-            </label>
-          </span>
-        </div>
-        <div
-          ref={logRef}
-          className="overflow-y-auto h-72 font-mono text-[11px] leading-relaxed py-1"
-        >
-          {log.map((e, i) => (
-            <LogLine key={i} entry={e} />
-          ))}
-          {log.length === 0 && (
-            <div className="text-stone-500 italic px-4 py-2">
-              {isTerminal
-                ? "(no per-file events captured in this stream)"
-                : "Waiting for first file…"}
+      {(() => {
+        const errorCount = log.filter((l) => l.status === "error").length;
+        const visibleLog = errorsOnly ? log.filter((l) => l.status === "error") : log;
+        return (
+          <div className="bg-stone-50">
+            <div className="px-4 py-2 border-b border-stone-200 flex items-center text-[11px] gap-3">
+              <span className="text-stone-500 uppercase tracking-wider font-medium">
+                Activity log
+              </span>
+              <span className="text-stone-400 tabular-nums">{log.length}</span>
+              {errorCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setErrorsOnly((v) => !v)}
+                  className={
+                    "inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium tabular-nums transition " +
+                    (errorsOnly
+                      ? "bg-rose-600 text-white"
+                      : "bg-rose-100 text-rose-800 hover:bg-rose-200")
+                  }
+                  title={errorsOnly ? "Show everything" : "Show only the failed files"}
+                >
+                  <span>✗</span> {errorCount} error{errorCount === 1 ? "" : "s"}
+                  {errorsOnly && <span className="ml-1 opacity-80">× clear</span>}
+                </button>
+              )}
+              <span className="ml-auto flex items-center gap-3">
+                <span className="text-stone-400 hidden sm:inline">
+                  <span className="text-stone-500">+</span> new
+                  <span className="ml-2 text-stone-400">↻</span> cached
+                  <span className="ml-2 text-rose-600">✗</span> error
+                </span>
+                <label className="text-stone-500 flex items-center gap-1 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoScroll}
+                    onChange={(e) => setAutoScroll(e.target.checked)}
+                    className="accent-stone-700"
+                  />
+                  Auto-scroll
+                </label>
+              </span>
             </div>
-          )}
-        </div>
-      </div>
+            <div
+              ref={logRef}
+              className="overflow-y-auto h-72 font-mono text-[11px] leading-relaxed py-1"
+            >
+              {visibleLog.map((e, i) => (
+                <LogLine key={i} entry={e} />
+              ))}
+              {visibleLog.length === 0 && (
+                <div className="text-stone-500 italic px-4 py-2">
+                  {errorsOnly
+                    ? "No errors. Nice."
+                    : isTerminal
+                      ? "(no per-file events captured in this stream)"
+                      : "Waiting for first file…"}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

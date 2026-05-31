@@ -100,6 +100,77 @@ function ActiveJobsBanner({ jobs }: { jobs: Job[] }) {
   );
 }
 
+/* ── Recent jobs row ─────────────────────────────────────────────
+   The header chip + ActiveJobsBanner only surface in-flight work.
+   Once a scan ends (done / failed / stopped) the chip disappears
+   and the user lost the only path back to the job detail. This row
+   keeps the last 3 terminal jobs on the Library page so they're
+   always one click away — important for diagnosing why a scan
+   failed without having to know /jobs exists. */
+function RecentJobsRow({
+  jobs,
+  hideWhenActive,
+}: {
+  jobs: Job[];
+  hideWhenActive: boolean;
+}) {
+  if (hideWhenActive) return null;
+  const visible = jobs.slice(0, 3);
+  if (visible.length === 0) return null;
+  return (
+    <section className="mb-6">
+      <div className="flex items-baseline justify-between mb-2">
+        <h2 className="t-section">Recent jobs</h2>
+        <Link
+          to="/jobs"
+          className="text-[10px] text-stone-400 hover:text-stone-900 underline-offset-2 hover:underline"
+        >
+          View all →
+        </Link>
+      </div>
+      <div className="bg-white border border-stone-200 rounded-xl divide-y divide-stone-100">
+        {visible.map((j) => {
+          const cls =
+            j.status === "failed"
+              ? "bg-rose-500"
+              : j.status === "stopped"
+                ? "bg-amber-500"
+                : "bg-emerald-500";
+          const label =
+            j.status === "failed"
+              ? "Failed"
+              : j.status === "stopped"
+                ? "Paused"
+                : "Done";
+          const when = j.finishedAt ? relativeTime(j.finishedAt) : "—";
+          return (
+            <Link
+              key={j.id}
+              to="/jobs"
+              className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-stone-50 transition"
+            >
+              <span className={"w-1.5 h-1.5 rounded-full shrink-0 " + cls} />
+              <span className="flex-1 min-w-0 truncate text-stone-800" title={j.description}>
+                {j.description}
+              </span>
+              <span className="shrink-0 t-section">{label}</span>
+              {j.errors > 0 && (
+                <span className="shrink-0 text-xs text-rose-700 tabular-nums">
+                  {j.errors} error{j.errors === 1 ? "" : "s"}
+                </span>
+              )}
+              <span className="shrink-0 text-xs text-stone-400 tabular-nums">
+                {j.done.toLocaleString()} / {j.total.toLocaleString()}
+              </span>
+              <span className="shrink-0 text-xs text-stone-400">{when}</span>
+            </Link>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function ActiveJobCard({ job }: { job: Job }) {
   const pct = job.total > 0 ? Math.round((job.done / job.total) * 100) : 0;
   const elapsed = (Date.now() - job.startedAt) / 1000;
@@ -487,7 +558,7 @@ export default function Library() {
   const [query, setQuery] = useState("");
   const [classifyJobId, setClassifyJobId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
-  const { active } = useJobs(3000);
+  const { active, recent } = useJobs(3000);
   const [watchedCount, setWatchedCount] = useState<number | null>(null);
   const [wizardDismissed, setWizardDismissed] = useState(false);
 
@@ -550,6 +621,8 @@ export default function Library() {
       <SystemBar />
 
       <ActiveJobsBanner jobs={active} />
+
+      <RecentJobsRow jobs={recent} hideWhenActive={active.length > 0} />
 
       {showWizard && (
         <FirstRunWizard
