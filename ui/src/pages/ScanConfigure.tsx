@@ -261,6 +261,48 @@ export default function ScanConfigure() {
 
       {preview && perm.state === "granted" && (
         <>
+          {/* Zero-indexable warning. The Start button is disabled in
+              this state but it isn't obvious why — the old footer
+              text "Ready to index 0 files" reads like a benign
+              status line. This banner is the one piece of UI the
+              user needs to see to understand what's wrong + what to
+              try, so it sits above everything else on the page. */}
+          {effectiveIndexable === 0 && (
+            <section className="mb-6">
+              <div className="bg-rose-50 border-2 border-rose-200 rounded-xl p-5">
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="t-section text-rose-900">
+                    Nothing here can be indexed yet
+                  </span>
+                </div>
+                <p className="text-sm text-rose-900/90 leading-relaxed mb-3">
+                  Out of <strong>{preview.totalScanned.toLocaleString()}</strong>{" "}
+                  files Bitrove scanned, <strong>0</strong> match your
+                  current settings, so the Start button is disabled.
+                  Try one of these:
+                </p>
+                <ul className="space-y-1.5 text-sm text-rose-900/90">
+                  {preview.topExtensions.some((e) => !e.indexable) && (
+                    <li>
+                      • Tap a greyed file type in <em>File types found</em>{" "}
+                      below to include it in this scan.
+                    </li>
+                  )}
+                  {excludedFromTree > 0 && (
+                    <li>
+                      • Re-check some of the sub-folders you've unchecked
+                      under <em>Pick what to include</em>.
+                    </li>
+                  )}
+                  <li>
+                    • Or go back to the dashboard and pick a folder that
+                    contains PDFs, Markdown, Word docs, or text files.
+                  </li>
+                </ul>
+              </div>
+            </section>
+          )}
+
           {/* Heavy task warning — only when estimated time crosses
               the "user might want to schedule this" threshold (~10
               min). We don't want to noisily warn on tiny scans. */}
@@ -496,10 +538,26 @@ export default function ScanConfigure() {
 
       {/* ── Sticky footer (start button) ───────────────────── */}
       <div className="sticky bottom-0 -mx-4 px-4 pt-6 pb-4 bg-gradient-to-t from-stone-50 via-stone-50/90 to-stone-50/0 flex items-center gap-3">
-        <FolderOpenIcon size={16} className="text-stone-400" />
-        <span className="text-xs text-stone-500">
+        <FolderOpenIcon
+          size={16}
+          className={
+            preview && perm.state === "granted" && effectiveIndexable === 0
+              ? "text-rose-600"
+              : "text-stone-400"
+          }
+        />
+        <span
+          className={
+            "text-xs " +
+            (preview && perm.state === "granted" && effectiveIndexable === 0
+              ? "text-rose-700 font-medium"
+              : "text-stone-500")
+          }
+        >
           {preview && perm.state === "granted"
-            ? `Ready to index ${effectiveIndexable.toLocaleString()} file${effectiveIndexable === 1 ? "" : "s"}`
+            ? effectiveIndexable === 0
+              ? "Nothing to index — adjust file types or sub-folders above"
+              : `Ready to index ${effectiveIndexable.toLocaleString()} file${effectiveIndexable === 1 ? "" : "s"}`
             : "—"}
         </span>
         <Link
@@ -519,9 +577,11 @@ export default function ScanConfigure() {
           }
           className="px-5 py-1.5 rounded-md text-sm font-medium bg-stone-900 text-white hover:bg-stone-700 disabled:opacity-40 disabled:cursor-not-allowed"
           title={
-            health && (!health.embed || !health.rerank)
-              ? "Install an embedding model in Settings → Models first"
-              : undefined
+            effectiveIndexable === 0
+              ? "Nothing in this folder matches your current file-type settings — see the red banner above"
+              : health && (!health.embed || !health.rerank)
+                ? "Install an embedding model in Settings → Models first"
+                : undefined
           }
         >
           {submitting
