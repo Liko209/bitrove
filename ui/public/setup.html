@@ -193,6 +193,29 @@
       /** @type {Record<string,any>} */ let statuses = {};
       let downloading = false;
 
+      function pct(s) {
+        const t = s?.totalBytes || s?.approxBytes || 0;
+        const d = s?.downloadedBytes || 0;
+        return t > 0 ? Math.min(100, Math.round((d / t) * 100)) : 0;
+      }
+      function partialBytes() {
+        return (statuses.embed?.downloadedBytes || 0) + (statuses.rerank?.downloadedBytes || 0);
+      }
+      function hasPartial() {
+        const e = statuses.embed, r = statuses.rerank;
+        return (
+          (e && e.status !== "ready" && (e.downloadedBytes || 0) > 0) ||
+          (r && r.status !== "ready" && (r.downloadedBytes || 0) > 0)
+        );
+      }
+      function hasError() {
+        return statuses.embed?.status === "error" || statuses.rerank?.status === "error";
+      }
+      function errorMessage() {
+        const e = statuses.embed?.error, r = statuses.rerank?.error;
+        return [e && "embed: " + e, r && "reranker: " + r].filter(Boolean).join(" · ");
+      }
+
       function fmtBytes(n) {
         if (!n && n !== 0) return "—";
         if (n < 1024 * 1024) return (n / 1024).toFixed(0) + " KB";
@@ -237,18 +260,47 @@
         const tier = tiers.find((x) => x.id === selected);
         const approxTotal = (tier.embed.approxBytes || 0) + 438_000_000; // reranker fixed
         actionBtn.disabled = downloading;
-        actionBtn.textContent = downloading ? "Downloading…" : "Download & start";
-        hintEl.textContent = "Selected " + tier.label +
-          " · " + fmtBytes(approxTotal) + " total (embed + reranker)";
+
+        // Button text + hint adapt to current state so the user knows
+        // what they're committing to: fresh download, resume from a
+        // partial, or retry after an error.
+        const partial = hasPartial();
+        const errored = hasError();
+        if (downloading) {
+          actionBtn.textContent = "Downloading…";
+        } else if (errored) {
+          actionBtn.textContent = "Retry download";
+        } else if (partial) {
+          actionBtn.textContent = "Resume download";
+        } else {
+          actionBtn.textContent = "Download & start";
+        }
+
+        if (errored) {
+          hintEl.textContent = "Previous attempt failed — click Retry to continue.";
+        } else if (partial) {
+          const remaining = Math.max(0, approxTotal - partialBytes());
+          hintEl.textContent = "Resuming " + tier.label +
+            " · " + fmtBytes(remaining) + " left of " + fmtBytes(approxTotal);
+        } else {
+          hintEl.textContent = "Selected " + tier.label +
+            " · " + fmtBytes(approxTotal) + " total (embed + reranker)";
+        }
       }
 
       function renderProgress() {
         const ids = ["embed", "rerank"];
-        const anyActive = ids.some((id) => {
+        // Show the card whenever there's anything interesting to look
+        // at: an active transfer, a half-finished .part on disk, or an
+        // error message. Stays hidden only on a truly fresh install.
+        const interesting = ids.some((id) => {
           const s = statuses[id];
-          return s && (s.status === "downloading" || s.status === "verifying");
+          if (!s) return false;
+          if (s.status === "downloading" || s.status === "verifying" || s.status === "error") return true;
+          if ((s.downloadedBytes || 0) > 0 && s.status !== "ready") return true;
+          return false;
         });
-        if (!anyActive && !downloading) {
+        if (!interesting && !downloading) {
           progressEl.hidden = true;
           return;
         }
@@ -260,7 +312,7 @@
           if (!s) continue;
           const total = s.totalBytes || s.approxBytes || 0;
           const done = s.downloadedBytes || 0;
-          const pct = total > 0 ? Math.min(100, (done / total) * 100) : 0;
+          const p = pct(s);
           const row = document.createElement("div");
           row.className = "progress-row";
           const fmtSpeed = s.speedBps
@@ -268,12 +320,22 @@
                 ? (s.speedBps / 1024).toFixed(0) + " KB/s"
                 : (s.speedBps / 1024 / 1024).toFixed(1) + " MB/s")
             : "";
+          // Status label maps onto the actual lifecycle: a partial
+          // download with status="missing" + downloadedBytes>0 means
+          // the user came back to a half-finished transfer.
+          let statusLabel;
+          if (s.status === "ready") statusLabel = "Ready";
+          else if (s.status === "verifying") statusLabel = "Verifying";
+          else if (s.status === "downloading") statusLabel = "Downloading";
+          else if (s.status === "error") statusLabel = "Error";
+          else if (done > 0) statusLabel = "Paused at " + p + "%";
+          else statusLabel = "Pending";
           row.innerHTML =
             '<div class="label"><span>' + (s.displayName || id) + ' · ' +
-            (s.status === "ready" ? "Ready" : s.status === "verifying" ? "Verifying" : "Downloading") +
+            statusLabel +
             '</span><span>' + fmtBytes(done) + ' / ' + fmtBytes(total) +
             (fmtSpeed ? ' · ' + fmtSpeed : "") + '</span></div>' +
-            '<div class="progress-bar"><div class="fill" style="width:' + pct.toFixed(1) + '%"></div></div>';
+            '<div class="progress-bar"><div class="fill" style="width:' + p + '%"></div></div>';
           cont.appendChild(row);
         }
       }
@@ -284,14 +346,30 @@
           tiers = data.tiers;
           recommended = data.recommended;
           active = data.active;
+          statuses = data.statuses || {};
+          // If the user came back to a half-finished download, default
+          // the selection to the tier whose embed model matches that
+          // .part — so clicking Resume keeps that progress instead of
+          // silently switching tiers.
           selected = recommended;
+          if (hasPartial() || hasError()) {
+            const partialName = statuses.embed?.filename;
+            const match = tiers.find((x) => x.embed.displayName === statuses.embed?.displayName);
+            if (match) selected = match.id;
+            else if (active) selected = active;
+          }
           hwEl.innerHTML = '<span><strong>' + data.hardware.cpuModel + '</strong> · ' +
             data.hardware.totalRamGB + ' GB · ' + data.hardware.arch + '</span>' +
             '<span>Recommended: <strong>' +
             (tiers.find((x) => x.id === recommended)?.label || recommended) +
             '</strong></span>';
           renderTiers();
+          renderProgress();
           updateAction();
+          if (hasError()) {
+            errEl.hidden = false;
+            errEl.textContent = "Last attempt: " + errorMessage();
+          }
         } catch (e) {
           errEl.hidden = false;
           errEl.textContent = "Failed to read tiers: " + (e?.message || e);
@@ -299,7 +377,15 @@
 
         // Stream download status updates from the existing channel.
         try {
-          t.onModelsUpdate((s) => { statuses = s; renderProgress(); });
+          t.onModelsUpdate((s) => {
+            statuses = s;
+            renderProgress();
+            updateAction();
+            if (hasError() && !downloading) {
+              errEl.hidden = false;
+              errEl.textContent = errorMessage();
+            }
+          });
         } catch {}
       }
 

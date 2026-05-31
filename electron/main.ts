@@ -295,7 +295,8 @@ ipcMain.handle("system:hardware", async () => {
 // machine's RAM + the active selection (if any). setup.html reads
 // this to render the tier picker on first launch.
 ipcMain.handle("setup:listTiers", async () => {
-  const { TIERS, recommendTier } = await import("./setup.ts");
+  const { TIERS, recommendTier, refreshModelStatuses, getModelStatuses } =
+    await import("./setup.ts");
   const os = await import("node:os");
   const totalRamGB = Math.round(os.totalmem() / 1024 ** 3);
   const recommended = recommendTier(totalRamGB);
@@ -308,6 +309,9 @@ ipcMain.handle("setup:listTiers", async () => {
     const j = JSON.parse(raw);
     if (j.activeModelTier) active = j.activeModelTier;
   } catch {}
+  // Pick up any half-finished .part files on disk so setup.html can
+  // render "Resume from 47%" before the user kicks off the next try.
+  refreshModelStatuses();
   return {
     tiers: TIERS.map((t) => ({
       id: t.id,
@@ -323,6 +327,7 @@ ipcMain.handle("setup:listTiers", async () => {
     })),
     recommended,
     active,
+    statuses: getModelStatuses(),
     hardware: {
       totalRamGB,
       cpuModel: os.cpus()[0]?.model ?? "unknown",

@@ -55,6 +55,7 @@ const bitrove = {
     }[];
     recommended: "light" | "standard" | "quality" | "max";
     active: string;
+    statuses: Record<string, ModelStatus>;
     hardware: { totalRamGB: number; cpuModel: string; arch: string };
   }> => ipcRenderer.invoke("setup:listTiers"),
   downloadForTier: (

@@ -224,6 +224,7 @@ export function refreshModelStatuses(): void {
   const specs = activeSpecs();
   for (const m of specs) {
     const full = join(dir, m.filename);
+    const tmp = full + ".part";
     // Refresh the display name + filename in STATE too so the
     // onboarding UI / progress widgets don't show "bge-m3" when the
     // active tier is Standard / Quality / Max.
@@ -239,8 +240,23 @@ export function refreshModelStatuses(): void {
       } catch {
         STATE[m.id] = { ...STATE[m.id], status: "missing" };
       }
+    } else if (existsSync(tmp)) {
+      // Surface the half-finished .part so the setup UI can show
+      // "Resume from 47%" instead of a fresh 0% bar after the user
+      // killed the app mid-download.
+      try {
+        const sz = statSync(tmp).size;
+        STATE[m.id] = {
+          ...STATE[m.id],
+          status: "missing",
+          downloadedBytes: sz,
+          totalBytes: m.approxBytes,
+        };
+      } catch {
+        STATE[m.id] = { ...STATE[m.id], status: "missing", downloadedBytes: 0, totalBytes: undefined };
+      }
     } else {
-      STATE[m.id] = { ...STATE[m.id], status: "missing" };
+      STATE[m.id] = { ...STATE[m.id], status: "missing", downloadedBytes: 0, totalBytes: undefined };
     }
   }
   notify();
@@ -263,12 +279,28 @@ export function cancelDownload(id: ModelSpec["id"]): void {
 // callers should use this directly; downloadModel(id) is preserved
 // for the legacy IPC that just expects "embed"/"rerank".
 export async function downloadSpec(spec: ModelSpec): Promise<void> {
-  return downloadModelInternal(spec);
+  return dedupedDownload(spec);
 }
 
 export async function downloadModel(id: ModelSpec["id"]): Promise<void> {
   const spec = MODELS.find((m) => m.id === id)!;
-  return downloadModelInternal(spec);
+  return dedupedDownload(spec);
+}
+
+// Coalesce concurrent download requests for the same id. Without this,
+// two simultaneous downloadForTier IPC calls (button bounce, tier
+// switch retry, double setup wizard load) would spawn two fetch +
+// writeStream pairs racing over the same .part file and corrupt it.
+const ACTIVE_DOWNLOADS = new Map<ModelSpec["id"], Promise<void>>();
+
+function dedupedDownload(spec: ModelSpec): Promise<void> {
+  const existing = ACTIVE_DOWNLOADS.get(spec.id);
+  if (existing) return existing;
+  const promise = downloadModelInternal(spec).finally(() => {
+    ACTIVE_DOWNLOADS.delete(spec.id);
+  });
+  ACTIVE_DOWNLOADS.set(spec.id, promise);
+  return promise;
 }
 
 async function downloadModelInternal(spec: ModelSpec): Promise<void> {
@@ -315,11 +347,14 @@ async function downloadModelInternal(spec: ModelSpec): Promise<void> {
   }
 
   // 416 means our resume offset is beyond file end; restart from scratch.
+  // Call downloadModelInternal directly (not dedupedDownload) — we're
+  // already inside the dedup promise and re-entering it would deadlock
+  // waiting for ourselves to finish.
   if (res.status === 416) {
     try {
       await unlink(tmpPath);
     } catch {}
-    return downloadModel(id);
+    return downloadModelInternal(spec);
   }
   if (!res.ok && res.status !== 206) {
     STATE[id] = {
@@ -331,12 +366,29 @@ async function downloadModelInternal(spec: ModelSpec): Promise<void> {
     return;
   }
 
+  // Server ignored our Range header and served the whole file (200).
+  // Appending that to .part would double its size and silently corrupt
+  // the model (no SHA in catalog → llama-server would fail to load).
+  // Wipe the .part and start fresh from byte 0.
+  if (resumeFrom > 0 && res.status === 200) {
+    try {
+      await unlink(tmpPath);
+    } catch {}
+    resumeFrom = 0;
+    STATE[id] = { ...STATE[id], downloadedBytes: 0 };
+    notify();
+  }
+
   const contentLength = Number(res.headers.get("content-length") ?? 0);
   const totalBytes = resumeFrom + contentLength;
   STATE[id] = { ...STATE[id], totalBytes };
   notify();
 
   const out = createWriteStream(tmpPath, { flags: resumeFrom > 0 ? "a" : "w" });
+  // Surface async writeStream failures (disk full, EROFS, …) so they
+  // don't get swallowed while the reader loop keeps pulling bytes.
+  let writeError: Error | null = null;
+  out.on("error", (e) => { writeError = e; });
   const reader = res.body!.getReader();
 
   let got = resumeFrom;
@@ -344,45 +396,63 @@ async function downloadModelInternal(spec: ModelSpec): Promise<void> {
   let lastReportBytes = got;
   let aborted = false;
 
-  while (true) {
-    if (CANCEL_REQ.has(id)) {
-      aborted = true;
-      try {
-        reader.cancel();
-      } catch {}
-      break;
-    }
-    if (PAUSE_REQ.has(id)) {
-      try {
-        reader.cancel();
-      } catch {}
-      break;
-    }
+  // Wrap the read loop so a network failure (TCP reset, DNS flap,
+  // server hangup mid-stream) doesn't leak as an unhandled rejection
+  // that leaves STATE pinned at "downloading" forever.
+  try {
+    while (true) {
+      if (writeError) throw writeError;
+      if (CANCEL_REQ.has(id)) {
+        aborted = true;
+        try {
+          reader.cancel();
+        } catch {}
+        break;
+      }
+      if (PAUSE_REQ.has(id)) {
+        try {
+          reader.cancel();
+        } catch {}
+        break;
+      }
 
-    const { done, value } = await reader.read();
-    if (done) break;
-    out.write(value);
-    got += value.length;
+      const { done, value } = await reader.read();
+      if (done) break;
+      out.write(value);
+      got += value.length;
 
-    const now = Date.now();
-    if (now - lastReport > 250) {
-      const dt = (now - lastReport) / 1000;
-      const dBytes = got - lastReportBytes;
-      const speedBps = dBytes / dt;
-      const remaining = Math.max(0, (totalBytes || got) - got);
-      const etaSeconds = speedBps > 0 ? remaining / speedBps : Infinity;
-      STATE[id] = {
-        ...STATE[id],
-        status: "downloading",
-        downloadedBytes: got,
-        totalBytes: totalBytes || got,
-        speedBps,
-        etaSeconds,
-      };
-      notify();
-      lastReport = now;
-      lastReportBytes = got;
+      const now = Date.now();
+      if (now - lastReport > 250) {
+        const dt = (now - lastReport) / 1000;
+        const dBytes = got - lastReportBytes;
+        const speedBps = dBytes / dt;
+        const remaining = Math.max(0, (totalBytes || got) - got);
+        const etaSeconds = speedBps > 0 ? remaining / speedBps : Infinity;
+        STATE[id] = {
+          ...STATE[id],
+          status: "downloading",
+          downloadedBytes: got,
+          totalBytes: totalBytes || got,
+          speedBps,
+          etaSeconds,
+        };
+        notify();
+        lastReport = now;
+        lastReportBytes = got;
+      }
     }
+  } catch (e) {
+    try { reader.cancel(); } catch {}
+    out.end();
+    STATE[id] = {
+      ...STATE[id],
+      status: "error",
+      error: `download interrupted: ${(e as Error).message}`,
+      downloadedBytes: got,
+      totalBytes: totalBytes || got,
+    };
+    notify();
+    return;
   }
 
   out.end();
