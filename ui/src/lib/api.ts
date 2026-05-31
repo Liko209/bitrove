@@ -316,21 +316,30 @@ export const api = {
       body: JSON.stringify({ tier }),
     }),
   // OCR toggle + batch rerun for image-only PDFs.
-  // Index integrity. Exposes a dim-mismatch flag so the UI can
-  // prompt the user to rebuild explicitly rather than have the
-  // db layer wipe their chunks behind their back.
+  // Index integrity. See admin.ts /api/index/status for the rules.
   indexStatus: () =>
     j<{
       chunkCount: number;
       sourceCount: number;
-      chunkBearingSources: number;
+      expectedChunkSum: number;
+      activeJobs: number;
       dimMismatch: { stored: number; current: number } | null;
+      orphanedSources: boolean;
       needsReingest: boolean;
     }>("/api/index/status"),
-  rebuildIndex: () =>
-    j<{ ok: true; chunksDropped: number }>("/api/index/rebuild", {
-      method: "POST",
-    }),
+  // Atomic "tear it down and put it back": clears chunk_vecs + chunks
+  // AND fires a force re-scan for every watched root. Returns job
+  // ids so the UI can route to /jobs immediately. The split
+  // rebuildIndex() endpoint still exists internally for the tier-
+  // switch flow but is not exposed to the user — calling it from UI
+  // would leave the library half-rebuilt.
+  resetAndReingest: () =>
+    j<{
+      ok: true;
+      chunksDropped: number;
+      watchedRoots: number;
+      jobIds: string[];
+    }>("/api/index/reset-and-reingest", { method: "POST" }),
   ocrStatus: () => j<{ enabled: boolean; pending: number }>("/api/ocr/status"),
   setOcrEnabled: (enabled: boolean) =>
     j<{ enabled: boolean }>("/api/ocr/enabled", {

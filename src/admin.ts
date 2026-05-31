@@ -405,20 +405,50 @@ app.get("/api/ocr/status", (_req, res) => {
 });
 
 // ── /api/index ────────────────────────────────────────────
-// Surface chunk_vecs dim health to the UI so the user (not the
-// process) decides whether to wipe their index.
+// Surface chunk_vecs / chunks integrity to the UI so the user (not
+// the process) decides whether to wipe + repopulate the index.
+//
+// HOW WE DECIDE THE INDEX IS BROKEN (and why each check is here):
+//
+//   1. dimMismatch: meta.embed_dim on disk doesn't match the
+//      EMBED_DIM the admin process was started with. Cause: user
+//      switched tiers but chunk_vecs hasn't been rebuilt yet, OR
+//      some process opened the db with a wrong BITROVE_MODEL_TIER
+//      env. Either way the next search will fail with a dimension
+//      error, so we surface it.
+//
+//   2. orphanedSources: sources.chunk_count says "I produced N
+//      chunks" but the chunks table has zero rows. Cause: a
+//      previous version's openDb() ran the silent drop/rebuild
+//      (now disabled) and left the sources side untouched. The
+//      file list is intact but searches return nothing. This is
+//      exactly the 51-files / 1-chunk shape the user hit.
+//
+// Why we do NOT use these (avoiding false positives):
+//
+//   - "chunkCount < chunkBearingSources * 0.5" — a 5-file library
+//     with short text files could have a 1:1 chunk:source ratio
+//     legitimately. We don't want to slander healthy small libraries.
+//   - "no chunks at all" alone — that's true of a fresh install
+//     mid-first-scan. Also true of someone who only added image-only
+//     PDFs without OCR (those have chunk_count=0 by design).
+//   - "while a scan is running" — chunk counts move during ingest;
+//     don't warn while activeJobs > 0.
 app.get("/api/index/status", (_req, res) => {
   const db = openDb();
   const mismatch = dimMismatch(db);
   const chunkCount = (db
     .prepare(`SELECT COUNT(*) AS n FROM chunks`)
     .get() as { n: number }).n;
-  // Only count sources that actually expected chunks (text + catalog).
-  // image-only PDFs are needs_ocr=1 with chunk_count=0 by design and
-  // shouldn't make the index look broken.
-  const chunkBearingSources = (db
+  // Sources that *claim to have chunks*: missing_since IS NULL means
+  // the file still exists on disk; needs_ocr=0 excludes image-only
+  // PDFs that are SUPPOSED to have chunk_count=0 without OCR;
+  // chunk_count > 0 says "this source upserted with chunks at some
+  // point." Subtracting (actual chunks) from this sum tells us how
+  // many chunks are *expected but missing* — the actionable number.
+  const expectedChunkSum = (db
     .prepare(
-      `SELECT COUNT(*) AS n FROM sources
+      `SELECT COALESCE(SUM(chunk_count), 0) AS n FROM sources
        WHERE missing_since IS NULL AND needs_ocr = 0`,
     )
     .get() as { n: number }).n;
@@ -426,19 +456,23 @@ app.get("/api/index/status", (_req, res) => {
     .prepare(`SELECT COUNT(*) AS n FROM sources WHERE missing_since IS NULL`)
     .get() as { n: number }).n;
   db.close();
-  // "Healthy" requires the chunk count to roughly match the number of
-  // chunk-bearing sources. A 51-source / 1-chunk library is the
-  // user-visible shape of an index whose chunks were wiped at some
-  // point — flag it so the UI can prompt for a re-ingest. The 50% gate
-  // is generous; in practice a text file produces multiple chunks so a
-  // healthy ratio is >> 1.
-  const drastic = chunkBearingSources > 0 && chunkCount < chunkBearingSources * 0.5;
+  const activeJobs = listJobs(10).filter((j) => j.status === "running").length;
+  // Orphaned sources: sources promise chunks (expectedChunkSum > 0)
+  // but the chunks table has fewer rows than promised. The gap = how
+  // many ingest events were undone by a wipe. Strictly < (not !=)
+  // because a healthy in-progress scan can have chunks > expected
+  // briefly (we write chunks before updating chunk_count). We also
+  // suppress entirely while a scan is running — counts move there.
+  const orphanedSources =
+    activeJobs === 0 && expectedChunkSum > 0 && chunkCount < expectedChunkSum;
   res.json({
     chunkCount,
     sourceCount,
-    chunkBearingSources,
+    expectedChunkSum,
+    activeJobs,
     dimMismatch: mismatch,
-    needsReingest: mismatch != null || drastic,
+    orphanedSources,
+    needsReingest: mismatch != null || orphanedSources,
   });
 });
 
@@ -449,6 +483,10 @@ app.get("/api/index/status", (_req, res) => {
 // callers should be (a) Settings → Models "Rebuild index" button
 // and (b) the tier-switch flow after the user accepted the warning
 // modal.
+// Low-level "just clear the vector table" endpoint. Used internally
+// by the tier-switch flow (electron/main.ts) which then triggers its
+// own re-ingest. The UI never calls this — exposing it would split
+// the rebuild flow into two steps that look identical to the user.
 app.post("/api/index/rebuild", (req, res) => {
   const db = openDb();
   const before = (db
@@ -457,6 +495,52 @@ app.post("/api/index/rebuild", (req, res) => {
   rebuildChunkVecsForCurrentDim(db);
   db.close();
   res.json({ ok: true, chunksDropped: before });
+});
+
+// The user-facing "Rebuild" endpoint. Atomic: clears chunk_vecs +
+// chunks AND fires a force re-scan for every watched root. Returns
+// the list of new job ids so the UI can navigate straight to /jobs
+// without juggling state. Matches the literal meaning of "rebuild"
+// — tear it down AND put it back. Splitting these into two
+// user-driven steps was the v0.0.72 design mistake.
+app.post("/api/index/reset-and-reingest", async (_req, res) => {
+  // Clear first so the new ingests don't fight with stale chunks.
+  const db = openDb();
+  const chunksDropped = (db
+    .prepare(`SELECT COUNT(*) AS n FROM chunks`)
+    .get() as { n: number }).n;
+  rebuildChunkVecsForCurrentDim(db);
+  const roots = listWatchedRoots(db).map((r) => r.path);
+  db.close();
+
+  // Enqueue one scan job per watched root (POST /api/ingest/scan in
+  // proc, but we just call createJob + run the same loop the scan
+  // endpoint does — keeps everything in this process without an HTTP
+  // hop). We use the existing scan endpoint internally via fetch to
+  // reuse all its option parsing and stop / progress wiring.
+  const jobIds: string[] = [];
+  for (const root of roots) {
+    try {
+      const r = await fetch(`http://127.0.0.1:${PORT}/api/ingest/scan`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          root,
+          watchAfterScan: true,
+          force: true,
+        }),
+      });
+      if (r.ok) {
+        const j = (await r.json()) as { jobId: string };
+        jobIds.push(j.jobId);
+      }
+    } catch {
+      // best effort — if a root fails to enqueue we surface the
+      // partial result and the UI shows it
+    }
+  }
+
+  res.json({ ok: true, chunksDropped, watchedRoots: roots.length, jobIds });
 });
 
 app.put("/api/ocr/enabled", async (req, res) => {

@@ -566,9 +566,15 @@ function ScheduledTasksSection() {
 function IndexHealthBanner() {
   const navigate = useNavigate();
   const [status, setStatus] = useState<Awaited<ReturnType<typeof api.indexStatus>> | null>(null);
+  // Two-step inline confirm because window.confirm() is unreliable
+  // in Electron + contextIsolation. Stays visible until the user
+  // either commits or cancels — no silent-fail path.
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
+  const tick = () => api.indexStatus().then(setStatus).catch(() => {});
   useEffect(() => {
-    const tick = () => api.indexStatus().then(setStatus).catch(() => {});
     tick();
     const t = setInterval(tick, 15000);
     return () => clearInterval(t);
@@ -577,8 +583,27 @@ function IndexHealthBanner() {
   if (!status || !status.needsReingest) return null;
 
   const dimLine = status.dimMismatch
-    ? `Stored ${status.dimMismatch.stored}-dim vectors but active model is ${status.dimMismatch.current}-dim.`
+    ? `Stored ${status.dimMismatch.stored}-dim vectors but the active embed model produces ${status.dimMismatch.current}-dim vectors.`
     : `${status.sourceCount.toLocaleString()} files registered but only ${status.chunkCount.toLocaleString()} searchable chunks — your vectors got wiped at some point.`;
+
+  async function rebuild() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await api.resetAndReingest();
+      if (r.jobIds.length > 0) {
+        navigate(`/jobs/${r.jobIds[0]}`);
+      } else {
+        // No watched roots — at least clear the warning by refreshing.
+        await tick();
+        setConfirming(false);
+      }
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200">
@@ -591,19 +616,53 @@ function IndexHealthBanner() {
             Search index needs rebuild
           </div>
           <p className="text-xs text-amber-900/85 leading-relaxed mb-3">
-            {dimLine} Nothing is searchable until you rebuild + re-ingest.
-            Two steps: open Settings to rebuild the empty vector table,
-            then come back and re-scan your watched folders below.
+            {dimLine} Rebuilding clears the broken vectors and
+            immediately re-ingests every watched folder so the index
+            is searchable again.
           </p>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => navigate("/settings?section=models")}
-              className="text-xs px-3 py-1.5 rounded-md bg-amber-900 text-white hover:bg-amber-800"
-            >
-              Open Settings → Rebuild index
-            </button>
-          </div>
+          {err && (
+            <div className="mb-3 text-xs text-rose-700">
+              {err}
+            </div>
+          )}
+          {confirming ? (
+            <div className="rounded-lg bg-rose-50 border border-rose-200 p-3">
+              <p className="text-xs text-rose-900 leading-relaxed mb-3">
+                <strong>Wipe {status.chunkCount.toLocaleString()} stored chunks and re-scan all watched folders?</strong>{" "}
+                Your file list and folders stay. Re-ingesting may take a
+                while depending on library size — progress shows on the
+                Jobs page.
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={rebuild}
+                  disabled={busy}
+                  className="text-xs px-3 py-1.5 rounded-md bg-rose-700 text-white hover:bg-rose-800 disabled:opacity-40"
+                >
+                  {busy ? "Starting…" : "Yes, rebuild now"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirming(false)}
+                  disabled={busy}
+                  className="text-xs px-3 py-1.5 rounded-md text-rose-900 hover:bg-rose-100"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirming(true)}
+                className="text-xs px-3 py-1.5 rounded-md bg-amber-900 text-white hover:bg-amber-800"
+              >
+                Rebuild index
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
