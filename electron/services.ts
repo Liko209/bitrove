@@ -160,6 +160,18 @@ export async function startAdmin(): Promise<void> {
     // via process.env so the admin doesn't have to know about
     // Electron's packaging layout.
     BITROVE_OCR_BIN: ocrBinary(),
+    // Tells admin.ts mcpServerSpec() to emit the packaged MCP config
+    // (Electron binary + .mjs entry + ELECTRON_RUN_AS_NODE env) rather
+    // than the dev fallback that points at a src/server.ts which
+    // doesn't ship with the .app. Without these two envs the
+    // /api/agents/claude-config endpoint hands users a path Claude
+    // Code can't resolve, and /mcp fails with -32000.
+    ...(app.isPackaged
+      ? {
+          BITROVE_PACKAGED: "1",
+          BITROVE_APP_ROOT: join(process.resourcesPath, "app"),
+        }
+      : {}),
   };
 
   // In packaged mode the admin entry runs inside Electron's bundled Node;

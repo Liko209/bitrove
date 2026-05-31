@@ -496,15 +496,19 @@ function mcpServerSpec(): {
   env?: Record<string, string>;
 } {
   // The MCP server file location depends on whether we're packaged or dev.
-  // Dev: src/server.ts via tsx. Packaged: bundled JS.
+  // Dev: src/server.ts via tsx. Packaged: bundled .mjs reached through
+  // the Electron binary with ELECTRON_RUN_AS_NODE=1 (Bitrove ships
+  // Electron, not a standalone Node, so the MCP client has to launch
+  // Electron-as-Node — same trick services.ts uses for the admin).
   const isPackagedAdmin = process.env.BITROVE_PACKAGED === "1";
   if (isPackagedAdmin) {
     const adminRoot = process.env.BITROVE_APP_ROOT;
     if (!adminRoot) throw new Error("BITROVE_APP_ROOT not set in packaged admin");
     return {
       command: process.execPath,
-      args: [join(adminRoot, "mcp", "index.js")],
+      args: [join(adminRoot, "mcp", "index.mjs")],
       env: {
+        ELECTRON_RUN_AS_NODE: "1",
         EMBED_URL: process.env.EMBED_URL ?? "http://127.0.0.1:8765",
         RERANK_URL: process.env.RERANK_URL ?? "http://127.0.0.1:8766",
         KB_DB: process.env.KB_DB ?? join(adminRoot, "data", "index.db"),
