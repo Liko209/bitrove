@@ -410,42 +410,51 @@ app.get("/api/ocr/status", (_req, res) => {
 //
 // HOW WE DECIDE THE INDEX IS BROKEN (and why each check is here):
 //
-//   1. dimMismatch: meta.embed_dim on disk doesn't match the
-//      EMBED_DIM the admin process was started with. Cause: user
-//      switched tiers but chunk_vecs hasn't been rebuilt yet, OR
-//      some process opened the db with a wrong BITROVE_MODEL_TIER
-//      env. Either way the next search will fail with a dimension
-//      error, so we surface it.
+//   1. dimMismatch — meta.embed_dim on disk doesn't match the
+//      EMBED_DIM the admin process was started with. Next search
+//      will fail with a dimension error; surface it.
 //
-//   2. orphanedSources: sources.chunk_count says "I produced N
-//      chunks" but the chunks table has zero rows. Cause: a
-//      previous version's openDb() ran the silent drop/rebuild
-//      (now disabled) and left the sources side untouched. The
-//      file list is intact but searches return nothing. This is
-//      exactly the 51-files / 1-chunk shape the user hit.
+//   2. orphanedSources — TWO sub-cases. activeJobs === 0 gates
+//      both, because chunk counts move during a live scan.
+//
+//      (a) Partial wipe: sources.chunk_count says "I produced
+//          N chunks total" but the chunks table has fewer rows.
+//          Some chunks were dropped but the bookkeeping wasn't.
+//
+//      (b) Full wipe (the 51-files / 1-chunk shape the user hit):
+//          chunk_bearing sources still exist but ALL their
+//          chunk_count fields are 0. That's the user-visible
+//          shape of an old openDb()-auto-rebuild having reset
+//          everything in lockstep — SUM=0, COUNT=0 looks
+//          "consistent" but isn't actually populated. Detected
+//          via `chunkBearingSources > 0 && expectedChunkSum == 0`
+//          (using a chunkBearingSources count that excludes
+//          image-only PDFs, missing files, and untracked rows).
 //
 // Why we do NOT use these (avoiding false positives):
 //
 //   - "chunkCount < chunkBearingSources * 0.5" — a 5-file library
-//     with short text files could have a 1:1 chunk:source ratio
-//     legitimately. We don't want to slander healthy small libraries.
-//   - "no chunks at all" alone — that's true of a fresh install
-//     mid-first-scan. Also true of someone who only added image-only
-//     PDFs without OCR (those have chunk_count=0 by design).
+//     with short text files could have a 1:1 ratio legitimately.
+//   - "no chunks at all" without the chunkBearingSources>0 guard
+//     — true of a fresh install mid-first-scan. Also true of
+//     someone whose only files are image-only PDFs without OCR.
 //   - "while a scan is running" — chunk counts move during ingest;
-//     don't warn while activeJobs > 0.
+//     activeJobs gate prevents that race.
 app.get("/api/index/status", (_req, res) => {
   const db = openDb();
   const mismatch = dimMismatch(db);
   const chunkCount = (db
     .prepare(`SELECT COUNT(*) AS n FROM chunks`)
     .get() as { n: number }).n;
-  // Sources that *claim to have chunks*: missing_since IS NULL means
-  // the file still exists on disk; needs_ocr=0 excludes image-only
-  // PDFs that are SUPPOSED to have chunk_count=0 without OCR;
-  // chunk_count > 0 says "this source upserted with chunks at some
-  // point." Subtracting (actual chunks) from this sum tells us how
-  // many chunks are *expected but missing* — the actionable number.
+  // Sources that should have chunks: still on disk, not flagged
+  // image-only-pdf (those are needs_ocr=1 with chunk_count=0 by
+  // design and shouldn't make the index look broken).
+  const chunkBearingSources = (db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM sources
+       WHERE missing_since IS NULL AND needs_ocr = 0`,
+    )
+    .get() as { n: number }).n;
   const expectedChunkSum = (db
     .prepare(
       `SELECT COALESCE(SUM(chunk_count), 0) AS n FROM sources
@@ -457,17 +466,18 @@ app.get("/api/index/status", (_req, res) => {
     .get() as { n: number }).n;
   db.close();
   const activeJobs = listJobs(10).filter((j) => j.status === "running").length;
-  // Orphaned sources: sources promise chunks (expectedChunkSum > 0)
-  // but the chunks table has fewer rows than promised. The gap = how
-  // many ingest events were undone by a wipe. Strictly < (not !=)
-  // because a healthy in-progress scan can have chunks > expected
-  // briefly (we write chunks before updating chunk_count). We also
-  // suppress entirely while a scan is running — counts move there.
-  const orphanedSources =
-    activeJobs === 0 && expectedChunkSum > 0 && chunkCount < expectedChunkSum;
+  // (a) chunk counts disagree about how many chunks should exist.
+  const partialWipe =
+    expectedChunkSum > 0 && chunkCount < expectedChunkSum;
+  // (b) wholly reset: chunk-bearing sources exist but they all say
+  // "0 chunks" — that's not a valid post-ingest state.
+  const fullWipe =
+    chunkBearingSources > 0 && expectedChunkSum === 0;
+  const orphanedSources = activeJobs === 0 && (partialWipe || fullWipe);
   res.json({
     chunkCount,
     sourceCount,
+    chunkBearingSources,
     expectedChunkSum,
     activeJobs,
     dimMismatch: mismatch,

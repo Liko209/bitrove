@@ -321,6 +321,7 @@ export const api = {
     j<{
       chunkCount: number;
       sourceCount: number;
+      chunkBearingSources: number;
       expectedChunkSum: number;
       activeJobs: number;
       dimMismatch: { stored: number; current: number } | null;
