@@ -48,6 +48,8 @@ import {
   listMissingSources,
   watchedRootStats,
   aliasesForSources,
+  dropIndexedUnderPrefixes,
+  promoteAliasToSource,
 } from "./db.ts";
 import {
   initWatchers,
@@ -622,7 +624,26 @@ app.post("/api/ingest/scan", async (req, res) => {
 
     const db = openDb();
     if (watchAfterScan) {
-      addWatchedRoot(db, root);
+      // Persist the user's per-scan excludes so the file watcher
+      // honors them on subsequent passes — otherwise the watcher
+      // would happily re-index files in folders the user just
+      // deselected. extraExcludes is the union of the modal's
+      // subdir checkbox unchecks + any caller-supplied excludes.
+      addWatchedRoot(db, root, extraExcludes);
+    }
+    // If the user excluded sub-trees that were previously indexed
+    // under this root, drop the stale rows so search stops pointing
+    // at files we'll no longer maintain. Safe for fresh roots (no
+    // matches) and for non-watched scans (the caller still may want
+    // a one-off cleanup).
+    const cleaned =
+      extraExcludes.length > 0
+        ? dropIndexedUnderPrefixes(db, root, extraExcludes)
+        : { sources: 0, aliases: 0 };
+    if (cleaned.sources + cleaned.aliases > 0) {
+      console.log(
+        `[scan] excluded subtree cleanup: ${cleaned.sources} sources + ${cleaned.aliases} aliases removed under ${root}`,
+      );
     }
     let done = 0;
     let stoppedEarly = false;
@@ -952,12 +973,13 @@ app.get("/api/watched-roots", (_req, res) => {
 
 app.post("/api/watched-roots", async (req, res) => {
   const path = (req.body?.path as string) || "";
+  const excludes = (req.body?.excludes as string[]) ?? [];
   if (!path || !existsSync(path)) {
     return res.status(400).json({ error: "path missing or does not exist" });
   }
   const db = openDb();
   try {
-    addWatchedRoot(db, path);
+    addWatchedRoot(db, path, excludes);
     const row = listWatchedRoots(db).find((r) => r.path === path);
     res.json({ row });
   } finally {
@@ -1047,14 +1069,23 @@ app.delete("/api/missing-files", (req, res) => {
   }
   const db = openDb();
   let removed = 0;
+  let promoted = 0;
   try {
     for (const p of paths) {
       const sRow = db
         .prepare(`SELECT missing_since FROM sources WHERE source_path = ?`)
         .get(p) as { missing_since: number | null } | undefined;
       if (sRow && sRow.missing_since != null) {
-        deleteSource(db, p);
-        removed++;
+        // Try to promote a present alias to the source slot first; if
+        // that succeeds the chunks survive and we count it as a
+        // promote rather than a delete. Otherwise wipe the row.
+        const newPath = promoteAliasToSource(db, p);
+        if (newPath) {
+          promoted++;
+        } else {
+          deleteSource(db, p);
+          removed++;
+        }
         continue;
       }
       const aRow = db
@@ -1068,7 +1099,7 @@ app.delete("/api/missing-files", (req, res) => {
   } finally {
     db.close();
   }
-  res.json({ removed });
+  res.json({ removed, promoted });
 });
 
 app.listen(PORT, "127.0.0.1", () => {

@@ -172,7 +172,26 @@ export function search(
   return db.prepare(sql).all(...params) as SearchHit[];
 }
 
-export function deleteSource(db: Database.Database, source_path: string): number {
+export function deleteSource(
+  db: Database.Database,
+  source_path: string,
+  opts: { promoteAlias?: boolean } = {},
+): number {
+  // When a source goes missing on disk (vs. the user explicitly
+  // deleting it) and there's still a present alias pointing at it,
+  // prefer promoting the alias over destroying the chunks. The
+  // caller signals intent via opts.promoteAlias = true. Sources/UI
+  // delete keeps the default (false) — "remove" should mean remove.
+  if (opts.promoteAlias) {
+    // Forward-declare to avoid a top-level circular reference: this
+    // helper is exported below and only used here.
+    const promoted = promoteAliasToSource(db, source_path);
+    if (promoted) {
+      // Chunks have been re-pointed to the alias path; nothing else
+      // to do for this row.
+      return 0;
+    }
+  }
   const rows = db
     .prepare(`SELECT id FROM chunks WHERE source_path = ?`)
     .all(source_path) as { id: number }[];
@@ -184,6 +203,8 @@ export function deleteSource(db: Database.Database, source_path: string): number
     db.prepare(`DELETE FROM chunks WHERE source_path = ?`).run(source_path);
     db.prepare(`DELETE FROM sources WHERE source_path = ?`).run(source_path);
     db.prepare(`DELETE FROM source_tags WHERE source_path = ?`).run(source_path);
+    // Also drop dangling aliases that pointed at this source.
+    db.prepare(`DELETE FROM file_aliases WHERE source_path = ?`).run(source_path);
   });
   tx();
   return ids.length;
@@ -258,10 +279,28 @@ export type WatchedRoot = {
   last_scanned_at: number | null;
   last_completed_at: number | null;
   watch_enabled: number; // 0 or 1
+  // JSON-encoded string[] of absolute path prefixes (e.g.
+  // "/Users/x/Documents/Downloads/") to skip in addition to the
+  // global settings excludes. Set by the scan-confirm UI when the
+  // user unchecks a sub-folder.
+  excludes: string;
 };
 
 export function listWatchedRoots(db: Database.Database): WatchedRoot[] {
   return db.prepare(`SELECT * FROM watched_roots ORDER BY added_at DESC`).all() as WatchedRoot[];
+}
+
+export function getWatchedRootExcludes(db: Database.Database, path: string): string[] {
+  const row = db.prepare(`SELECT excludes FROM watched_roots WHERE path = ?`).get(path) as
+    | { excludes: string | null }
+    | undefined;
+  if (!row || !row.excludes) return [];
+  try {
+    const arr = JSON.parse(row.excludes) as unknown;
+    return Array.isArray(arr) ? (arr as string[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 // Per-root counters surfaced to the UI so the user can see what each
@@ -333,11 +372,50 @@ export function watchedRootStats(db: Database.Database, root: string): WatchedRo
   };
 }
 
-export function addWatchedRoot(db: Database.Database, path: string): void {
+export function addWatchedRoot(
+  db: Database.Database,
+  path: string,
+  excludes: string[] = [],
+): void {
   db.prepare(
-    `INSERT INTO watched_roots (path, added_at, watch_enabled) VALUES (?, ?, 1)
-     ON CONFLICT(path) DO UPDATE SET watch_enabled = 1`,
-  ).run(path, Date.now());
+    `INSERT INTO watched_roots (path, added_at, watch_enabled, excludes) VALUES (?, ?, 1, ?)
+     ON CONFLICT(path) DO UPDATE SET
+        watch_enabled = 1,
+        excludes = excluded.excludes`,
+  ).run(path, Date.now(), JSON.stringify(excludes));
+}
+
+// When the user excludes a sub-tree from a watched root, prior runs
+// likely indexed files under that prefix — drop them so search stops
+// pointing at content we'll no longer maintain. Returns the count
+// removed so the caller can surface a "cleaned N files" message.
+export function dropIndexedUnderPrefixes(
+  db: Database.Database,
+  watchedRoot: string,
+  excludedPrefixes: string[],
+): { sources: number; aliases: number } {
+  if (excludedPrefixes.length === 0) return { sources: 0, aliases: 0 };
+  const srcPaths = (db
+    .prepare(`SELECT source_path FROM sources WHERE watched_root = ?`)
+    .all(watchedRoot) as { source_path: string }[]).map((r) => r.source_path);
+  const aliasPaths = (db
+    .prepare(`SELECT path FROM file_aliases WHERE watched_root = ?`)
+    .all(watchedRoot) as { path: string }[]).map((r) => r.path);
+  const matches = (p: string) => excludedPrefixes.some((pre) => p.startsWith(pre));
+  let sources = 0;
+  let aliases = 0;
+  const tx = db.transaction(() => {
+    for (const p of srcPaths.filter(matches)) {
+      deleteSource(db, p);
+      sources++;
+    }
+    for (const p of aliasPaths.filter(matches)) {
+      db.prepare(`DELETE FROM file_aliases WHERE path = ?`).run(p);
+      aliases++;
+    }
+  });
+  tx();
+  return { sources, aliases };
 }
 
 export function removeWatchedRoot(db: Database.Database, path: string): void {

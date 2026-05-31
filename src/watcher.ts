@@ -36,6 +36,7 @@ import {
   markScanRun,
   markSourcesMissing,
   markAliasesMissing,
+  getWatchedRootExcludes,
   type WatchedRoot,
 } from "./db.ts";
 import { walkSmart } from "./walker.ts";
@@ -59,6 +60,10 @@ type WatchEntry = {
   // Path the watcher is actively running ingestFile() on, exposed to
   // the UI so "Scanning…" rows can show the live file.
   currentFile: string | null;
+  // User-supplied path-prefix excludes for this watched root (set in
+  // the scan-confirm UI). Combined with the global settings excludes
+  // when filtering chokidar events and walking the tree.
+  perRootExcludes: string[];
 };
 
 const active = new Map<string, WatchEntry>();
@@ -100,12 +105,27 @@ export async function startWatching(root: WatchedRoot): Promise<void> {
   // periodic walk treat the same files as in-scope.
   const folderPatterns = foldersToWalkerExcludes(settings.excludedFolders);
 
+  // Per-root absolute path prefixes the user excluded in the scan-
+  // confirm UI (e.g. "/Users/x/Documents/Downloads/"). The DB stores
+  // them as the canonical source of truth — re-read here so a watcher
+  // restart picks up edits.
+  const dbForExcl = openDb();
+  let perRootExcludes: string[];
+  try {
+    perRootExcludes = getWatchedRootExcludes(dbForExcl, root.path);
+  } finally {
+    dbForExcl.close();
+  }
+
   const watcher = chokidar.watch(root.path, {
     ignored: (path) => {
       // Hidden dotfiles / iCloud placeholders (same heuristics as walker)
       if (/(^|\/)\.[^/]+$/.test(path)) return true;
       if (/\.icloud$/i.test(path)) return true;
       for (const pat of folderPatterns) if (path.includes(pat)) return true;
+      // User-defined sub-tree excludes — straight path-prefix match
+      // against the absolute path.
+      for (const ex of perRootExcludes) if (path.startsWith(ex)) return true;
       const ext = path.includes(".") ? path.slice(path.lastIndexOf(".")).toLowerCase() : "";
       if (ext && settings.excludedExts.includes(ext)) return true;
       return false;
@@ -133,6 +153,7 @@ export async function startWatching(root: WatchedRoot): Promise<void> {
     periodicTimer: null,
     scanning: false,
     currentFile: null,
+    perRootExcludes,
   };
 
   const scheduleDrain = () => {
@@ -231,7 +252,9 @@ async function runFullPass(entry: WatchEntry): Promise<void> {
 
     const settings = await readIngestSettings();
     const walkOpts = {
-      excludes: foldersToWalkerExcludes(settings.excludedFolders),
+      // Per-root excludes go in *before* the global folder excludes so
+      // either category can short-circuit the walker.
+      excludes: [...entry.perRootExcludes, ...foldersToWalkerExcludes(settings.excludedFolders)],
       excludeExts: settings.excludedExts,
     };
 
