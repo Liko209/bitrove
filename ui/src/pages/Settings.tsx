@@ -14,17 +14,25 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../lib/api.ts";
 import { UpdateFooter } from "../components/UpdateSection.tsx";
+import {
+  TIER_META,
+  recommendTier,
+  tierMeta,
+  formatBytes,
+  type Tier,
+} from "../lib/tiers.ts";
 
-type Section = "filters" | "watcher" | "about";
+type Section = "filters" | "models" | "watcher" | "about";
 
 const TABS: { id: Section; label: string }[] = [
   { id: "filters", label: "Filters" },
+  { id: "models", label: "Models" },
   { id: "watcher", label: "Watcher" },
   { id: "about", label: "About" },
 ];
 
 function isSection(s: string | null): s is Section {
-  return s === "filters" || s === "watcher" || s === "about";
+  return s === "filters" || s === "models" || s === "watcher" || s === "about";
 }
 
 export default function Settings() {
@@ -71,6 +79,7 @@ export default function Settings() {
         </nav>
         <div>
           {section === "filters" && <FiltersSection />}
+          {section === "models" && <ModelsSection />}
           {section === "watcher" && <WatcherSection />}
           {section === "about" && <AboutSection />}
         </div>
@@ -559,6 +568,160 @@ function AboutSection() {
           </li>
         </ul>
       </section>
+    </div>
+  );
+}
+
+/* ── Models ──────────────────────────────────────────────────────── */
+
+type Hardware = Awaited<ReturnType<NonNullable<Window["bitrove"]>["getHardware"]>>;
+
+function ModelsSection() {
+  const [activeTier, setActiveTier] = useState<Tier | null>(null);
+  const [hardware, setHardware] = useState<Hardware | null>(null);
+  const [pendingTier, setPendingTier] = useState<Tier | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const bridge = window.bitrove;
+
+  useEffect(() => {
+    api
+      .getActiveModelTier()
+      .then((r) => setActiveTier(r.tier))
+      .catch((e) => setErr((e as Error).message));
+    if (bridge?.getHardware) {
+      bridge.getHardware().then(setHardware).catch(() => {});
+    }
+  }, []);
+
+  const recommended = hardware ? recommendTier(hardware.totalRamGB) : null;
+
+  async function selectTier(t: Tier) {
+    if (t === activeTier) return;
+    // Confirm modal lives in P1.4 — for now just stage the choice;
+    // P1.4 will hook in here to render the warning, then on confirm
+    // call api.setActiveModelTier(t) + trigger the switch flow.
+    setPendingTier(t);
+  }
+
+  async function commitTier() {
+    if (!pendingTier) return;
+    try {
+      await api.setActiveModelTier(pendingTier);
+      setActiveTier(pendingTier);
+      setPendingTier(null);
+      alert(
+        `Tier persisted to settings. Model download + llama-server switch + re-ingest are wired in P1.5/P1.6 — for now the change only takes effect on next admin restart.`,
+      );
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  }
+
+  return (
+    <div>
+      <h2 className="t-h2 mb-2">Embedding model</h2>
+      <p className="text-stone-600 text-sm mb-8">
+        Bitrove uses an on-device model to turn your documents into
+        searchable vectors. Different tiers trade quality for speed and
+        RAM. Reranker is fixed at bge-reranker-v2-m3 across all tiers.
+      </p>
+
+      {err && (
+        <div className="mb-4 p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded text-sm">
+          {err}
+        </div>
+      )}
+
+      {/* Hardware block */}
+      <section className="mb-8">
+        <h3 className="t-section mb-3">Your Mac</h3>
+        {hardware ? (
+          <div className="bg-white border border-stone-200 rounded-xl p-4 text-sm">
+            <div className="flex items-baseline justify-between gap-3 mb-1">
+              <span className="font-medium text-stone-900">{hardware.cpuModel}</span>
+              <span className="text-stone-500 tabular-nums">
+                {hardware.totalRamGB} GB RAM · {hardware.cores} cores · {hardware.arch}
+              </span>
+            </div>
+            {recommended && (
+              <div className="text-xs text-stone-500 mt-1">
+                Recommended tier for your Mac:{" "}
+                <strong className="text-stone-800">{tierMeta(recommended).label}</strong>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-xs text-stone-500 italic">Hardware probe unavailable.</div>
+        )}
+      </section>
+
+      {/* Tier cards */}
+      <section>
+        <h3 className="t-section mb-3">Choose a tier</h3>
+        <div className="space-y-2">
+          {TIER_META.map((t) => {
+            const isActive = t.id === activeTier;
+            const isPending = t.id === pendingTier;
+            const isRecommended = t.id === recommended;
+            return (
+              <button
+                key={t.id}
+                onClick={() => selectTier(t.id)}
+                className={
+                  "w-full text-left p-4 rounded-xl border transition " +
+                  (isPending
+                    ? "border-stone-900 bg-stone-50"
+                    : isActive
+                      ? "border-emerald-300 bg-emerald-50/50"
+                      : "border-stone-200 bg-white hover:border-stone-400")
+                }
+              >
+                <div className="flex items-baseline justify-between gap-3 mb-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium text-stone-900">{t.label}</span>
+                    {isActive && (
+                      <span className="label-eyebrow text-emerald-700">Active</span>
+                    )}
+                    {isRecommended && !isActive && (
+                      <span className="label-eyebrow text-stone-500">Recommended</span>
+                    )}
+                  </div>
+                  <span className="text-xs text-stone-500 tabular-nums shrink-0">
+                    {formatBytes(t.embedSizeBytes)} · ~{t.estRamGB} GB RAM · ~{t.estDocsPerSec} docs/s
+                  </span>
+                </div>
+                <div className="text-xs text-stone-500 mt-1">{t.blurb}</div>
+                <div className="text-[11px] text-stone-400 font-mono mt-1">
+                  {t.embedName} · {t.embedDim}-dim
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {pendingTier && pendingTier !== activeTier && (
+        <div className="sticky bottom-0 -mx-4 px-4 pt-8 pb-4 bg-gradient-to-t from-stone-50 via-stone-50/90 to-stone-50/0 flex items-center gap-3">
+          <span className="text-xs text-stone-500">
+            Selected <strong>{tierMeta(pendingTier).label}</strong>. Full switch
+            flow (download + re-ingest) ships in the next release.
+          </span>
+          <div className="ml-auto flex gap-2">
+            <button
+              onClick={() => setPendingTier(null)}
+              className="text-sm px-3 py-1.5 rounded-md text-stone-700 hover:bg-stone-100"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={commitTier}
+              className="text-sm px-4 py-1.5 rounded-md bg-stone-900 text-white font-medium hover:bg-stone-700"
+            >
+              Save selection
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

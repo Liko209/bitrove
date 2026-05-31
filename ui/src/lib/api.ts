@@ -281,6 +281,14 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(s),
     }),
+  getActiveModelTier: () =>
+    j<{ tier: "light" | "standard" | "quality" | "max" }>("/api/models/active"),
+  setActiveModelTier: (tier: "light" | "standard" | "quality" | "max") =>
+    j<{ tier: string }>("/api/models/active", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tier }),
+    }),
   watcherHistory: () =>
     j<{
       events: (

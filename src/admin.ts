@@ -328,6 +328,28 @@ app.post("/api/ingest/retry/:id", async (req, res) => {
   });
 });
 
+// ── /api/models/active ─────────────────────────────────────
+// Reads the user's chosen model tier from ingest-settings.json.
+// Returned to Settings → Models for the "Currently active" display.
+// PUT just rewrites the tier field — actual model download +
+// llama-server restart + index rebuild is orchestrated by electron's
+// switch-tier IPC chain (P1.5 / P1.6), not by this endpoint, so the
+// admin can stay stateless about model lifecycle.
+app.get("/api/models/active", async (_req, res) => {
+  const s = await readIngestSettings();
+  res.json({ tier: s.activeModelTier ?? "light" });
+});
+
+app.put("/api/models/active", async (req, res) => {
+  const tier = (req.body?.tier as string) ?? "";
+  if (!["light", "standard", "quality", "max"].includes(tier)) {
+    return res.status(400).json({ error: "invalid tier" });
+  }
+  const current = await readIngestSettings();
+  await writeIngestSettings({ ...current, activeModelTier: tier as "light" | "standard" | "quality" | "max" });
+  res.json({ tier });
+});
+
 // ── /api/watcher/history ───────────────────────────────────
 // Recent (last 200) events from every watched root: scan start /
 // complete, debounce drains, ingest errors. Used by the Settings

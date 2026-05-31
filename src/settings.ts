@@ -22,6 +22,10 @@ export type IngestSettings = {
   // Defaults to 30/30, which matches the original env-var defaults.
   watcherScanIntervalMin?: number;
   watcherDebounceMin?: number;
+  // Selected model tier. Drives which GGUF the llama-server loads
+  // and which embed.ts pooling/prefix strategy is used. Defaults to
+  // "light" (bge-m3) so existing installs keep working.
+  activeModelTier?: "light" | "standard" | "quality" | "max";
 };
 
 // Curated defaults — biased toward "skip what is rarely knowledge".
@@ -140,6 +144,7 @@ export async function readIngestSettings(): Promise<IngestSettings> {
       excludedFolders: parsed.excludedFolders ?? DEFAULT_EXCLUDED_FOLDERS,
       watcherScanIntervalMin: clampMin(parsed.watcherScanIntervalMin, DEFAULT_WATCHER_INTERVAL_MIN),
       watcherDebounceMin: clampMin(parsed.watcherDebounceMin, DEFAULT_WATCHER_DEBOUNCE_MIN),
+      activeModelTier: parsed.activeModelTier ?? "light",
     };
     return cached;
   } catch {
@@ -148,6 +153,7 @@ export async function readIngestSettings(): Promise<IngestSettings> {
       excludedFolders: [...DEFAULT_EXCLUDED_FOLDERS],
       watcherScanIntervalMin: DEFAULT_WATCHER_INTERVAL_MIN,
       watcherDebounceMin: DEFAULT_WATCHER_DEBOUNCE_MIN,
+      activeModelTier: "light",
     };
     return cached;
   }
@@ -161,6 +167,7 @@ export async function writeIngestSettings(
     excludedFolders: [...new Set(next.excludedFolders.map((s) => s.trim()).filter(Boolean))],
     watcherScanIntervalMin: clampMin(next.watcherScanIntervalMin, DEFAULT_WATCHER_INTERVAL_MIN),
     watcherDebounceMin: clampMin(next.watcherDebounceMin, DEFAULT_WATCHER_DEBOUNCE_MIN),
+    activeModelTier: next.activeModelTier ?? "light",
   };
   const p = settingsFilePath();
   await mkdir(dirname(p), { recursive: true });

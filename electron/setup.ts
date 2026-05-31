@@ -20,24 +20,138 @@ export type ModelSpec = {
   // SHA256 left empty for now; can be filled from HF API. v1 trusts HTTPS.
   sha256?: string;
   approxBytes: number;
+  // Embed-only: vector dim + pooling strategy + whether the model expects
+  // an "Instruct: ... \nQuery: ..." prefix on query-side embeds.
+  dim?: number;
+  pooling?: "cls" | "last";
+  needsInstruct?: boolean;
 };
 
-export const MODELS: ModelSpec[] = [
+// ── Model tiers ───────────────────────────────────────────────
+// Four embed-model tiers; reranker is fixed across all tiers (bge-
+// reranker-v2-m3 is small, stable, and benchmarks within ~2pt of
+// every Qwen-Reranker we tested — not worth doubling RAM for).
+//
+// Tier dim mapping is load-bearing — when a user switches between
+// tiers with different dims, db.ts has to drop+recreate chunk_vecs
+// and the user has to re-ingest. Light/Standard share 1024 so the
+// bge-m3 → Qwen-0.6B move only requires re-embed, not schema rebuild.
+//
+// All Qwen URLs use the official Qwen GGUF repos on HuggingFace.
+// Update the URLs / sha256 as new quants land.
+
+export type Tier = "light" | "standard" | "quality" | "max";
+
+export type TierSpec = {
+  id: Tier;
+  label: string;
+  blurb: string;
+  recommendedRamGB: number; // minimum healthy
+  estDocsPerSec: number;    // very rough; for time estimates in UI
+  embed: ModelSpec;
+};
+
+const RERANKER_SPEC: ModelSpec = {
+  id: "rerank",
+  filename: "bge-reranker-v2-m3-Q4_K_M.gguf",
+  displayName: "bge-reranker-v2-m3 (relevance reranker)",
+  url: "https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF/resolve/main/bge-reranker-v2-m3-Q4_K_M.gguf?download=true",
+  approxBytes: 438_000_000,
+};
+
+export const TIERS: TierSpec[] = [
   {
-    id: "embed",
-    filename: "bge-m3-Q4_K_M.gguf",
-    displayName: "bge-m3 (multilingual embeddings)",
-    url: "https://huggingface.co/gpustack/bge-m3-GGUF/resolve/main/bge-m3-Q4_K_M.gguf?download=true",
-    approxBytes: 437_000_000,
+    id: "light",
+    label: "Light",
+    blurb: "bge-m3 — battle-tested multilingual baseline. Best for 8 GB Macs.",
+    recommendedRamGB: 8,
+    estDocsPerSec: 10,
+    embed: {
+      id: "embed",
+      filename: "bge-m3-Q4_K_M.gguf",
+      displayName: "bge-m3 (multilingual embeddings)",
+      url: "https://huggingface.co/gpustack/bge-m3-GGUF/resolve/main/bge-m3-Q4_K_M.gguf?download=true",
+      approxBytes: 437_000_000,
+      dim: 1024,
+      pooling: "cls",
+      needsInstruct: false,
+    },
   },
   {
-    id: "rerank",
-    filename: "bge-reranker-v2-m3-Q4_K_M.gguf",
-    displayName: "bge-reranker-v2-m3 (relevance reranker)",
-    url: "https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF/resolve/main/bge-reranker-v2-m3-Q4_K_M.gguf?download=true",
-    approxBytes: 438_000_000,
+    id: "standard",
+    label: "Standard",
+    blurb: "Qwen3-Embedding-0.6B — same footprint as Light but newer architecture, 32K context.",
+    recommendedRamGB: 12,
+    estDocsPerSec: 8,
+    embed: {
+      id: "embed",
+      filename: "Qwen3-Embedding-0.6B-Q4_K_M.gguf",
+      displayName: "Qwen3-Embedding-0.6B",
+      url: "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q4_K_M.gguf?download=true",
+      approxBytes: 600_000_000,
+      dim: 1024,
+      pooling: "last",
+      needsInstruct: true,
+    },
+  },
+  {
+    id: "quality",
+    label: "Quality",
+    blurb: "Qwen3-Embedding-4B — best balance of retrieval quality + speed on 16 GB+ Macs.",
+    recommendedRamGB: 16,
+    estDocsPerSec: 3,
+    embed: {
+      id: "embed",
+      filename: "Qwen3-Embedding-4B-Q4_K_M.gguf",
+      displayName: "Qwen3-Embedding-4B",
+      url: "https://huggingface.co/Qwen/Qwen3-Embedding-4B-GGUF/resolve/main/Qwen3-Embedding-4B-Q4_K_M.gguf?download=true",
+      approxBytes: 2_400_000_000,
+      dim: 2560,
+      pooling: "last",
+      needsInstruct: true,
+    },
+  },
+  {
+    id: "max",
+    label: "Max",
+    blurb: "Qwen3-Embedding-8B — top of MTEB. Only worth it on 32 GB+ Pro/Max.",
+    recommendedRamGB: 32,
+    estDocsPerSec: 1.5,
+    embed: {
+      id: "embed",
+      filename: "Qwen3-Embedding-8B-Q4_K_M.gguf",
+      displayName: "Qwen3-Embedding-8B",
+      url: "https://huggingface.co/Qwen/Qwen3-Embedding-8B-GGUF/resolve/main/Qwen3-Embedding-8B-Q4_K_M.gguf?download=true",
+      approxBytes: 6_000_000_000,
+      dim: 4096,
+      pooling: "last",
+      needsInstruct: true,
+    },
   },
 ];
+
+export function tierById(id: Tier): TierSpec {
+  return TIERS.find((t) => t.id === id) ?? TIERS[0];
+}
+
+// Suggest the tier most appropriate for the user's hardware. The
+// rule is intentionally conservative — better to recommend a smaller
+// model and let the user opt up than to drop them into a 6 GB
+// download that swaps their laptop.
+export function recommendTier(totalRamGB: number): Tier {
+  if (totalRamGB >= 32) return "quality"; // not "max" — most users don't need it
+  if (totalRamGB >= 16) return "quality";
+  if (totalRamGB >= 12) return "standard";
+  return "light";
+}
+
+// Backward-compat shim: legacy code (setup ensureReady, services
+// spawnLlama) iterates MODELS as if it were a fixed [embed, rerank].
+// Default to Light tier; P1.5/P1.6 will replace these call sites with
+// `activeTierSpec().embed` so the active tier drives the model used.
+export const MODELS: ModelSpec[] = [TIERS[0].embed, RERANKER_SPEC];
+
+export { RERANKER_SPEC };
 
 export type ModelStatus = {
   id: ModelSpec["id"];

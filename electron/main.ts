@@ -205,6 +205,21 @@ ipcMain.handle("permissions:openSettings", async (_e, section?: string) => {
   await shell.openExternal(url);
 });
 
+// ── IPC: hardware introspection ───────────────────────────
+// Surfaces the user's machine specs to the renderer so Settings →
+// Models can recommend the right tier. Cheap (os.* calls), called
+// once per Settings open.
+ipcMain.handle("system:hardware", async () => {
+  const os = await import("node:os");
+  return {
+    totalRamGB: Math.round(os.totalmem() / 1024 ** 3),
+    cpuModel: os.cpus()[0]?.model ?? "unknown",
+    arch: process.arch,
+    cores: os.cpus().length,
+    platform: process.platform,
+  };
+});
+
 // ── IPC: model setup ──────────────────────────────────────
 ipcMain.handle("setup:listModels", () => ({
   catalog: MODELS,

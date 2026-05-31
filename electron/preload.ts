@@ -32,6 +32,13 @@ type PickedFile = {
 const bitrove = {
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke("dialog:pickFolder"),
   pickFiles: (): Promise<PickedFile[]> => ipcRenderer.invoke("dialog:pickFiles"),
+  getHardware: (): Promise<{
+    totalRamGB: number;
+    cpuModel: string;
+    arch: string;
+    cores: number;
+    platform: string;
+  }> => ipcRenderer.invoke("system:hardware"),
   getServicesState: (): Promise<Record<string, ServiceState>> =>
     ipcRenderer.invoke("services:state"),
   openExternal: (url: string): Promise<boolean> =>
