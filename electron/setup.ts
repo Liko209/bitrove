@@ -227,8 +227,19 @@ export function cancelDownload(id: ModelSpec["id"]): void {
   CANCEL_REQ.add(id);
 }
 
+// Download a specific spec (used by tier-switch flow). Tier-aware
+// callers should use this directly; downloadModel(id) is preserved
+// for the legacy IPC that just expects "embed"/"rerank".
+export async function downloadSpec(spec: ModelSpec): Promise<void> {
+  return downloadModelInternal(spec);
+}
+
 export async function downloadModel(id: ModelSpec["id"]): Promise<void> {
   const spec = MODELS.find((m) => m.id === id)!;
+  return downloadModelInternal(spec);
+}
+
+async function downloadModelInternal(spec: ModelSpec): Promise<void> {
   const dir = modelsDir();
   await mkdir(dir, { recursive: true });
   const finalPath = join(dir, spec.filename);

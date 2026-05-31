@@ -39,6 +39,10 @@ const bitrove = {
     cores: number;
     platform: string;
   }> => ipcRenderer.invoke("system:hardware"),
+  switchModelTier: (
+    tier: "light" | "standard" | "quality" | "max",
+  ): Promise<{ tier: string; watchedRootsReingested: boolean }> =>
+    ipcRenderer.invoke("setup:switchTier", tier),
   getServicesState: (): Promise<Record<string, ServiceState>> =>
     ipcRenderer.invoke("services:state"),
   openExternal: (url: string): Promise<boolean> =>

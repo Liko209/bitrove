@@ -14,6 +14,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../lib/api.ts";
 import { UpdateFooter } from "../components/UpdateSection.tsx";
+import { useNavigate } from "react-router-dom";
 import {
   TIER_META,
   recommendTier,
@@ -21,6 +22,7 @@ import {
   formatBytes,
   type Tier,
 } from "../lib/tiers.ts";
+import SwitchTierModal from "../components/SwitchTierModal.tsx";
 
 type Section = "filters" | "models" | "watcher" | "about";
 
@@ -577,6 +579,7 @@ function AboutSection() {
 type Hardware = Awaited<ReturnType<NonNullable<Window["bitrove"]>["getHardware"]>>;
 
 function ModelsSection() {
+  const navigate = useNavigate();
   const [activeTier, setActiveTier] = useState<Tier | null>(null);
   const [hardware, setHardware] = useState<Hardware | null>(null);
   const [pendingTier, setPendingTier] = useState<Tier | null>(null);
@@ -595,26 +598,9 @@ function ModelsSection() {
 
   const recommended = hardware ? recommendTier(hardware.totalRamGB) : null;
 
-  async function selectTier(t: Tier) {
+  function selectTier(t: Tier) {
     if (t === activeTier) return;
-    // Confirm modal lives in P1.4 — for now just stage the choice;
-    // P1.4 will hook in here to render the warning, then on confirm
-    // call api.setActiveModelTier(t) + trigger the switch flow.
     setPendingTier(t);
-  }
-
-  async function commitTier() {
-    if (!pendingTier) return;
-    try {
-      await api.setActiveModelTier(pendingTier);
-      setActiveTier(pendingTier);
-      setPendingTier(null);
-      alert(
-        `Tier persisted to settings. Model download + llama-server switch + re-ingest are wired in P1.5/P1.6 — for now the change only takes effect on next admin restart.`,
-      );
-    } catch (e) {
-      setErr((e as Error).message);
-    }
   }
 
   return (
@@ -700,27 +686,17 @@ function ModelsSection() {
         </div>
       </section>
 
-      {pendingTier && pendingTier !== activeTier && (
-        <div className="sticky bottom-0 -mx-4 px-4 pt-8 pb-4 bg-gradient-to-t from-stone-50 via-stone-50/90 to-stone-50/0 flex items-center gap-3">
-          <span className="text-xs text-stone-500">
-            Selected <strong>{tierMeta(pendingTier).label}</strong>. Full switch
-            flow (download + re-ingest) ships in the next release.
-          </span>
-          <div className="ml-auto flex gap-2">
-            <button
-              onClick={() => setPendingTier(null)}
-              className="text-sm px-3 py-1.5 rounded-md text-stone-700 hover:bg-stone-100"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={commitTier}
-              className="text-sm px-4 py-1.5 rounded-md bg-stone-900 text-white font-medium hover:bg-stone-700"
-            >
-              Save selection
-            </button>
-          </div>
-        </div>
+      {pendingTier && pendingTier !== activeTier && activeTier && (
+        <SwitchTierModal
+          fromTier={activeTier}
+          toTier={pendingTier}
+          onCancel={() => setPendingTier(null)}
+          onLaunched={() => {
+            setActiveTier(pendingTier);
+            setPendingTier(null);
+            navigate("/jobs");
+          }}
+        />
       )}
     </div>
   );

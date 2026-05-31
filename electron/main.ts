@@ -205,6 +205,76 @@ ipcMain.handle("permissions:openSettings", async (_e, section?: string) => {
   await shell.openExternal(url);
 });
 
+// ── IPC: switch model tier ────────────────────────────────
+// Single orchestrator the renderer calls after the user confirms a
+// tier switch (P1.4 modal). Steps:
+//   1. Persist activeModelTier in ingest-settings.json
+//   2. Download the new tier's embed GGUF (if not on disk)
+//   3. Restart llama-server + admin so the new tier takes effect
+//      (llama-server reads tier from settings; admin inherits
+//      BITROVE_MODEL_TIER env)
+//   4. Trigger a re-ingest of every watched root (db.ts auto-
+//      rebuilds chunk_vecs on first openDb call after dim change)
+//
+// Returns once the model is downloaded + services restarted. The
+// re-ingest jobs run async on admin; renderer should navigate to
+// /jobs to watch.
+ipcMain.handle(
+  "setup:switchTier",
+  async (_e, tier: "light" | "standard" | "quality" | "max") => {
+    const { TIERS, tierById, downloadSpec } = await import("./setup.ts");
+    const { restartServices } = await import("./services.ts");
+    const { writeFile, readFile, mkdir } = await import("node:fs/promises");
+    const { existsSync } = await import("node:fs");
+    const { join, dirname } = await import("node:path");
+
+    const target = tierById(tier);
+    if (!target) throw new Error(`unknown tier ${tier}`);
+
+    // 1. Persist tier into the same ingest-settings.json the admin
+    // and src/embed.ts read. Admin may not be reachable mid-restart,
+    // so write directly.
+    const userData = app.getPath("userData");
+    const settingsPath = join(userData, "ingest-settings.json");
+    let settings: Record<string, unknown> = {};
+    if (existsSync(settingsPath)) {
+      try {
+        settings = JSON.parse(await readFile(settingsPath, "utf8"));
+      } catch {}
+    }
+    settings.activeModelTier = tier;
+    await mkdir(dirname(settingsPath), { recursive: true });
+    await writeFile(settingsPath, JSON.stringify(settings, null, 2));
+
+    // 2. Download model if missing. downloadSpec emits progress to
+    // the existing setup:update channel so the modal can show it.
+    await downloadSpec(target.embed);
+
+    // 3. Restart services. New llama-server boots against the new
+    // model; admin inherits the new BITROVE_MODEL_TIER env.
+    await restartServices();
+
+    // 4. Trigger re-ingest: hit admin's scan endpoint for each
+    //    watched root. Done over HTTP so we don't have to share
+    //    db handles across processes.
+    try {
+      const res = await fetch("http://127.0.0.1:8770/api/watched-roots");
+      const data = (await res.json()) as { rows: { path: string }[] };
+      for (const row of data.rows) {
+        await fetch("http://127.0.0.1:8770/api/ingest/scan", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ root: row.path, watchAfterScan: true, force: true }),
+        });
+      }
+    } catch (e) {
+      console.warn("[switchTier] failed to trigger re-ingest:", (e as Error).message);
+    }
+
+    return { tier, watchedRootsReingested: true };
+  },
+);
+
 // ── IPC: hardware introspection ───────────────────────────
 // Surfaces the user's machine specs to the renderer so Settings →
 // Models can recommend the right tier. Cheap (os.* calls), called

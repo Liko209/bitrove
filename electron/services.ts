@@ -277,6 +277,15 @@ export async function startAll(): Promise<void> {
   console.log("services started:", getStates());
 }
 
+// Tear down + bring back up. Used by the tier-switch flow after the
+// new model file has finished downloading — startLlama() reads the
+// tier from settings each time so the new model auto-loads.
+export async function restartServices(): Promise<void> {
+  console.log("[services] restart requested");
+  await stopAll();
+  await startServices();
+}
+
 export function stopAll(): Promise<void> {
   return new Promise((resolve) => {
     const procs = Object.entries(PROCS).filter(([, p]) => p && !p.killed);
