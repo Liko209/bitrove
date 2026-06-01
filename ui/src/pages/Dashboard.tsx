@@ -217,6 +217,8 @@ export default function Dashboard() {
 
       <IndexHealthBanner />
 
+      <PendingIngestBanner />
+
       <ActiveJobsBanner jobs={active} />
 
       <ScheduledTasksSection />
@@ -739,6 +741,106 @@ function IndexHealthBanner() {
               </button>
             </div>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Pending ingest banner ─────────────────────────────────────
+   When the watcher has seen file changes but the 30-min debounce
+   hasn't fired yet, surface them on the Dashboard with a one-click
+   "Index now" shortcut. */
+function PendingIngestBanner() {
+  const navigate = useNavigate();
+  const [pending, setPending] = useState<{
+    paths: string[];
+    total: number;
+  } | null>(null);
+  const [debounceMin, setDebounceMin] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    const tick = async () => {
+      try {
+        const r = await api.listWatchedRoots();
+        const allPaths = r.watcher.active.flatMap((a) => a.dirtyPaths ?? []);
+        const total = r.watcher.active.reduce((s, a) => s + a.dirty, 0);
+        if (total > 0) setPending({ paths: allPaths, total });
+        else setPending(null);
+      } catch {}
+    };
+    tick();
+    api
+      .getIngestSettings()
+      .then((s) => setDebounceMin(s.current.watcherDebounceMin ?? 30))
+      .catch(() => setDebounceMin(30));
+    const t = setInterval(tick, 5000);
+    return () => clearInterval(t);
+  }, []);
+
+  if (!pending || pending.total === 0) return null;
+
+  async function indexNow() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await api.drainWatcher();
+      if (r.jobId) navigate(`/jobs/${r.jobId}`);
+      else setPending(null);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const sample = pending.paths.slice(0, 5);
+  const remainder = Math.max(0, pending.total - sample.length);
+
+  return (
+    <div className="mb-6 p-4 rounded-xl bg-sky-50 border border-sky-200">
+      <div className="flex items-start gap-3">
+        <div className="shrink-0 mt-0.5">
+          <span className="inline-block w-2 h-2 rounded-full bg-sky-500" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-sky-900 mb-1">
+            {pending.total} file{pending.total === 1 ? "" : "s"} waiting to index
+          </div>
+          <p className="text-xs text-sky-900/80 leading-relaxed mb-3">
+            The watcher will pick these up automatically in up to{" "}
+            <strong>{debounceMin ?? 30} min</strong>. Hit Index now if you'd
+            rather not wait — they'll run as a single ingest job you can
+            watch on the Jobs page.
+          </p>
+          {sample.length > 0 && (
+            <ul className="text-[11px] text-sky-900/90 mb-3 space-y-0.5">
+              {sample.map((p) => {
+                const name = p.split("/").pop() ?? p;
+                return (
+                  <li key={p} className="font-mono truncate" title={p}>
+                    {name}
+                  </li>
+                );
+              })}
+              {remainder > 0 && (
+                <li className="text-sky-700/80">+ {remainder.toLocaleString()} more</li>
+              )}
+            </ul>
+          )}
+          {err && <div className="mb-3 text-xs text-rose-700">{err}</div>}
+          <button
+            type="button"
+            onClick={indexNow}
+            disabled={busy}
+            className="text-xs px-3 py-1.5 rounded-md bg-sky-900 text-white hover:bg-sky-800 disabled:opacity-40"
+          >
+            {busy
+              ? "Starting…"
+              : `Index ${pending.total.toLocaleString()} file${pending.total === 1 ? "" : "s"} now`}
+          </button>
         </div>
       </div>
     </div>

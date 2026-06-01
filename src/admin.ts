@@ -60,6 +60,7 @@ import {
   startWatching,
   stopWatching,
   watcherStatus,
+  takePendingForImmediateIngest,
   getWatcherHistory,
 } from "./watcher.ts";
 import {
@@ -731,6 +732,38 @@ app.post("/api/ocr/run-all", async (_req, res) => {
   })().catch((e) => {
     emitJob(job.id, { type: "failed", error: (e as Error).message });
   });
+});
+
+// Drop everything in the watcher's pending dirty sets and start a
+// real ingest job against those paths immediately. Used by the
+// Dashboard "Index N files now" button — the watcher's normal 30
+// min debounce is the wrong call when the user is staring at the
+// screen waiting for their files to be searchable. Returns the
+// jobId so the UI can navigate the user straight to job progress.
+app.post("/api/watcher/drain", async (_req, res) => {
+  const { paths, rootCount } = takePendingForImmediateIngest();
+  if (paths.length === 0) {
+    return res.json({ ok: true, jobId: null, files: 0, watchedRoots: 0 });
+  }
+  try {
+    const r = await fetch(`http://127.0.0.1:${PORT}/api/ingest/files`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ paths, force: false }),
+    });
+    if (!r.ok) {
+      return res.status(500).json({ error: await r.text() });
+    }
+    const j = (await r.json()) as { jobId: string };
+    res.json({
+      ok: true,
+      jobId: j.jobId,
+      files: paths.length,
+      watchedRoots: rootCount,
+    });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
 });
 
 // ── /api/watcher/history ───────────────────────────────────

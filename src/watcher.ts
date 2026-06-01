@@ -356,6 +356,31 @@ async function waitForEmbedReady(maxMs: number): Promise<void> {
   throw new Error(`embed server not ready after ${maxMs} ms`);
 }
 
+// Snapshot every active watcher's pending paths and clear their
+// dirty Sets + debounce timers. Caller is expected to feed the
+// returned paths into a proper ingest-files job so the user sees
+// progress in the Jobs UI. Used by the Dashboard "Index now"
+// button — lets the user opt out of the 30 min debounce when they
+// know they want a freshly-dropped batch indexed immediately.
+export function takePendingForImmediateIngest(): {
+  paths: string[];
+  rootCount: number;
+} {
+  const allPaths: string[] = [];
+  let touchedRoots = 0;
+  for (const entry of active.values()) {
+    if (entry.dirty.size === 0) continue;
+    for (const p of entry.dirty) allPaths.push(p);
+    entry.dirty.clear();
+    if (entry.debounceTimer) {
+      clearTimeout(entry.debounceTimer);
+      entry.debounceTimer = null;
+    }
+    touchedRoots++;
+  }
+  return { paths: allPaths, rootCount: touchedRoots };
+}
+
 export async function stopWatching(path: string): Promise<void> {
   const entry = active.get(path);
   if (!entry) return;

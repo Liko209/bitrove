@@ -347,6 +347,17 @@ export const api = {
     j<{ ok: true; jobId: string; fileCount: number }>("/api/index/retry-stale", {
       method: "POST",
     }),
+  // Drop the watcher's pending dirty sets across all roots and
+  // queue them into a real ingest job right now, instead of
+  // waiting for the 30 min debounce. jobId is null if nothing
+  // was pending.
+  drainWatcher: () =>
+    j<{
+      ok: true;
+      jobId: string | null;
+      files: number;
+      watchedRoots: number;
+    }>("/api/watcher/drain", { method: "POST" }),
   // Atomic "tear it down and put it back": clears chunk_vecs + chunks
   // AND fires a force re-scan for every watched root. Returns job
   // ids so the UI can route to /jobs immediately. The split

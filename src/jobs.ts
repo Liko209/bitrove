@@ -63,6 +63,10 @@ export type JobState = {
 
 const ERROR_HISTORY_CAP = 500;
 const ITEM_HISTORY_CAP = 5000;
+// How many item records we keep on DISK (per job). In-memory we keep
+// up to ITEM_HISTORY_CAP for fast SSE replay of running jobs; on
+// persist we trim to this so jobs.json stays bounded.
+const PERSIST_ITEMS_PER_JOB = 200;
 
 const STATES = new Map<string, JobState>();
 const EMITTERS = new Map<string, EventEmitter>();
@@ -128,10 +132,19 @@ function persistNow(): void {
     STATES.clear();
     for (const j of all) STATES.set(j.id, j);
   }
-  // Strip recentItems before writing — it's an in-memory replay ring
-  // for the live SSE snapshot, not something we want to balloon
-  // jobs.json with (5k entries × 100 jobs = potentially many MB).
-  const onDisk = all.map(({ recentItems: _r, ...rest }) => rest);
+  // Truncate (don't strip) recentItems before writing. Keeping the
+  // last N items means re-opening a finished job still shows what
+  // it actually did — not just the failures, which used to be the
+  // only thing surviving across restarts. 200 × 100 jobs ≈ 3 MB on
+  // disk worst case; small enough that the persist cost stays a few
+  // ms but large enough that a typical scan of dozens-to-hundreds
+  // of files is fully recoverable.
+  const onDisk = all.map((j) => ({
+    ...j,
+    recentItems: j.recentItems
+      ? j.recentItems.slice(-PERSIST_ITEMS_PER_JOB)
+      : undefined,
+  }));
   const p = jobsFilePath();
   try {
     mkdirSync(dirname(p), { recursive: true });
