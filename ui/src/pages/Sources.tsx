@@ -272,6 +272,24 @@ export default function Sources() {
                           <span className="text-stone-900 truncate" title={r.name}>
                             {r.name}
                           </span>
+                          {(() => {
+                            // 24h grace = "just appeared". Renders an
+                            // emerald pill so the user can spot what
+                            // showed up since they last looked, without
+                            // forcing them to remember filenames.
+                            const ageMs = Date.now() - new Date(r.indexed_at).getTime();
+                            if (ageMs >= 0 && ageMs < 24 * 60 * 60 * 1000) {
+                              return (
+                                <span
+                                  className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                  title={`Indexed ${relTime(r.indexed_at)}`}
+                                >
+                                  New
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
                           {r.aliases && r.aliases.length > 0 && (
                             <span
                               className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-sky-50 text-sky-700 border border-sky-200"

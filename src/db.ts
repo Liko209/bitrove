@@ -852,8 +852,13 @@ export function listSources(db: Database.Database, opts: ListSourcesOpts = {}): 
 
   const rows = db
     .prepare(
+      // Newest-indexed first. The user's mental model when opening
+      // Sources is usually "what did I just add" — putting the
+      // 100k-old file at the top is the wrong default. source_path
+      // ASC stays as the tie-breaker so repeated bulk-ingests of
+      // the same timestamp are still ordered deterministically.
       `SELECT source_path, kind, chunk_count, source_mtime, indexed_at, needs_ocr, last_error FROM sources ${whereSql}
-       ORDER BY source_path LIMIT ? OFFSET ?`,
+       ORDER BY indexed_at DESC, source_path ASC LIMIT ? OFFSET ?`,
     )
     .all(...params, limit, offset) as ListSourcesResult["rows"];
 

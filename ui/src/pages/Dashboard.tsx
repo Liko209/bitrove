@@ -209,7 +209,7 @@ export default function Dashboard() {
   const indexedPaths = new Set(indexed.map((i) => i.rootPath));
 
   return (
-    <div className="max-w-4xl mx-auto pb-12">
+    <div className="pb-12">
       <h1 className="t-display mb-2">Dashboard</h1>
       <p className="text-stone-600 text-sm mb-8">
         Add content, watch indexing happen, see what's already in the library.

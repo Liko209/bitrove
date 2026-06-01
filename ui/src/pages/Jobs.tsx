@@ -43,7 +43,7 @@ export default function Jobs() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div>
       <div className="mb-6">
         <Link
           to="/dashboard"

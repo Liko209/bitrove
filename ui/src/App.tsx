@@ -46,7 +46,15 @@ export default function App() {
       <div className="flex-1 flex min-h-0">
         <Sidebar />
         <main className="flex-1 overflow-y-auto">
-          <div className="px-8 py-8">
+          {/* Single content container for every route. Pages used to
+              each set their own max-w-3xl / 4xl / 5xl, so the side
+              gutters jumped from tab to tab. Pinning the wrapper here
+              (5xl = 1024px) means every page reads from the same
+              left/right margin against the sidebar. Page bodies that
+              need a narrower form column (e.g. Settings) can still
+              add an inner max-w-*; full-width tables (Sources) just
+              fill this container. */}
+          <div className="max-w-5xl mx-auto px-8 py-8">
             <Routes>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<Dashboard />} />

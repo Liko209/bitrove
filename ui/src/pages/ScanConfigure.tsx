@@ -171,7 +171,7 @@ export default function ScanConfigure() {
   // ── render ──────────────────────────────────────────────────
   if (!path) {
     return (
-      <div className="max-w-3xl mx-auto">
+      <div>
         <h1 className="t-display mb-3">Scan</h1>
         <p className="text-stone-600 text-sm">Missing path. Go back to the dashboard and pick a folder.</p>
         <Link to="/dashboard" className="text-sm underline">← Back to dashboard</Link>
@@ -183,7 +183,7 @@ export default function ScanConfigure() {
   const checking = perm.state === "checking";
 
   return (
-    <div className="max-w-3xl mx-auto pb-20">
+    <div className="pb-20">
       <div className="mb-6">
         <Link to="/dashboard" className="text-xs text-stone-500 hover:text-stone-900 underline-offset-2 hover:underline">
           ← Back to dashboard

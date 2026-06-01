@@ -70,7 +70,7 @@ export default function Agents() {
     : "";
 
   return (
-    <div className="max-w-3xl mx-auto">
+    <div>
       <h1 className="t-display mb-3">AI tools</h1>
       <p className="text-stone-600 text-sm mb-8">
         Let your favourite AI agents read and search your library. Bitrove never sends
